@@ -1,6 +1,6 @@
 [package]
 name = "qptp"
-version = "1.0.0"
+version = "1.0.1"
 description = "Quest Pro Touch Plus desktop utility"
 authors = ["Lateir"]
 license = ""
