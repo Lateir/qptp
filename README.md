@@ -27,6 +27,8 @@ Run `build-installer.bat` to build the Windows NSIS installer. It compiles and b
 
 The installer is written to `src-tauri/target/release/bundle/nsis`. For a quick build without an installer, run `npm.cmd run tauri -- build --no-bundle`. In PowerShell, use `npm.cmd`: execution policy may block `npm.ps1` when calling `npm`.
 
+Pushing a tag that matches the version in `package.json` (for example, `v1.0.0`) runs the Windows installer workflow. It builds the SteamVR driver and NSIS installer on a Windows runner, uploads the installer as a workflow artifact, and attaches it to a GitHub release. Keep `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, and `src-tauri/Cargo.lock` at the same version before tagging.
+
 ## Behavior
 
 The app connects automatically on startup and retries if the Quest is unavailable or the stream disconnects. LAN is selected on the first launch. Choose USB or LAN on the **Settings** tab; the choice is saved. USB uses the bundled ADB and creates a `tcp:27182` port forward. LAN broadcasts the `QPD1` discovery packet to UDP port 27183, then connects to the discovered address. `QPS1` supplies controller connection, battery, and tracking data; `QPR2` updates X, Y, and force. Y = 0 is the top of the touchpad.

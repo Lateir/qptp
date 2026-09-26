@@ -55,5 +55,5 @@ Almost all logic is in two files. Both use a dense, compact style with many stat
 - It mirrors the Rust `Snapshot` as a TS type (camelCase via `serde(rename_all)`). If you change the Rust struct, update the TS type too.
 - Status JSON is read defensively: it accepts `status.left` or `status.controllers.left`, `battery_percent` or `battery`, and `tracked` or `tracking`, because the module's schema isn't pinned here.
 - Startup Tauri calls are guarded with `isTauri()`, so `npm run dev` in a plain browser renders the initial state. The module button calls Rust `open_module_page`, which uses Windows `ShellExecuteW` to open the system browser; plain browser preview uses `window.open`.
-- The frontend and Tauri bundle read the app version from the root `package.json`; `src-tauri/Cargo.toml` uses an internal crate version `0.0.0`.
+- The frontend and Tauri bundle read the app version from the root `package.json`; keep `src-tauri/Cargo.toml` and both lockfiles at the same release version.
 - `src/style.css` is plain CSS. It does not import Tailwind. The shadcn-vue components in `src/components/ui/` (`components.json`) are currently unused. `@` is an alias for `src/`.

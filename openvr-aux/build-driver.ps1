@@ -1,7 +1,11 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$vcvars = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
-if (!(Test-Path -LiteralPath $vcvars)) { throw 'Visual Studio 2022 C++ Build Tools are required.' }
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+if (!(Test-Path -LiteralPath $vswhere)) { throw 'Visual Studio Installer (vswhere.exe) is required.' }
+$installation = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1
+if (!$installation) { throw 'Visual Studio 2022 C++ tools are required.' }
+$vcvars = Join-Path $installation 'VC\Auxiliary\Build\vcvars64.bat'
+if (!(Test-Path -LiteralPath $vcvars)) { throw "vcvars64.bat is missing from $installation" }
 $output = Join-Path $root 'driver_qptp\bin\win64'
 $intermediate = Join-Path $root 'build-msvc'
 New-Item -ItemType Directory -Force -Path $output,$intermediate | Out-Null
