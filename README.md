@@ -29,7 +29,7 @@ The installer is written to `src-tauri/target/release/bundle/nsis`. For a quick 
 
 ## Behavior
 
-The app connects automatically on startup and retries if the Quest is unavailable or the stream disconnects. Choose USB or LAN on the **Settings** tab; the choice is saved. USB uses the bundled ADB and creates a `tcp:27182` port forward. LAN broadcasts the `QPD1` discovery packet to UDP port 27183, then connects to the discovered address. `QPS1` supplies controller connection, battery, and tracking data; `QPR2` updates X, Y, and force. Y = 0 is the top of the touchpad.
+The app connects automatically on startup and retries if the Quest is unavailable or the stream disconnects. LAN is selected on the first launch. Choose USB or LAN on the **Settings** tab; the choice is saved. USB uses the bundled ADB and creates a `tcp:27182` port forward. LAN broadcasts the `QPD1` discovery packet to UDP port 27183, then connects to the discovered address. `QPS1` supplies controller connection, battery, and tracking data; `QPR2` updates X, Y, and force. Y = 0 is the top of the touchpad.
 
 Minimizing destroys the window to release WebView2 memory while the app continues running in the system tray. Left-click the tray icon to reopen the window. Right-click to see the L and R controller indicators (green = connected, gray = disconnected) and **Quit**. Closing the window with its X button exits the app.
 

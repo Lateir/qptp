@@ -11,8 +11,8 @@ type InputMode = 'touchpad' | 'button' | 'two_buttons'
 type Side = { x:number; y:number; force:number }
 type Snapshot = { phase:string; message:string; transport:Mode; endpoint?:string; protocol?:string; samples:number; left:Side; right:Side; status?:Record<string,unknown>; inputMode:InputMode; pressThreshold:number; hapticAmplitude:number; language:Language; leftButtons:[boolean,boolean]; rightButtons:[boolean,boolean]; steamvrConnected:boolean; steamvrLifecycle:boolean }
 const zero={x:0,y:0,force:0}
-const snap=ref<Snapshot>({phase:'searching',message:'Поиск устройства…',transport:'usb',samples:0,left:zero,right:zero,inputMode:'touchpad',pressThreshold:0.30,hapticAmplitude:0.20,language:'ru',leftButtons:[false,false],rightButtons:[false,false],steamvrConnected:false,steamvrLifecycle:true})
-const mode=ref<Mode>('usb'),tab=ref<'mode'|'status'|'settings'>('status'),busy=ref(false)
+const snap=ref<Snapshot>({phase:'searching',message:'Поиск устройства…',transport:'lan',samples:0,left:zero,right:zero,inputMode:'touchpad',pressThreshold:0.30,hapticAmplitude:0.20,language:'ru',leftButtons:[false,false],rightButtons:[false,false],steamvrConnected:false,steamvrLifecycle:true})
+const mode=ref<Mode>('lan'),tab=ref<'mode'|'status'|'settings'>('status'),busy=ref(false)
 const inputBusy=ref(false),inputError=ref('')
 const linkError=ref(''),settingsError=ref(''),languageBusy=ref(false),lifecycleBusy=ref(false)
 const storedLanguage=localStorage.getItem('qptp-language')||''
@@ -41,7 +41,7 @@ onUnmounted(()=>unlisten?.())
 <div class="app">
   <TouchPad v-bind="snap.left" :live="online('left')" :mode="snap.inputMode" :buttons="snap.leftButtons" :threshold="snap.pressThreshold" :language="language"/>
   <main class="center">
-    <h1>Quest Pro <em>touch</em> Plus</h1>
+    <h1 v-if="tab!=='settings'">Quest Pro <em>touch</em> Plus</h1>
     <div class="view">
       <template v-if="tab==='status'">
         <p class="link" :title="phaseHint"><span>{{mode==='usb'?'USB':'LAN'}}</span><b :class="snap.phase">{{phaseLabel}}</b></p>
@@ -64,7 +64,7 @@ onUnmounted(()=>unlisten?.())
           <button :class="{active:mode==='lan'}" :disabled="busy" @click="select('lan')"><b>LAN</b><small>{{t('autoDiscovery')}}</small></button>
         </div>
         <div class="language-control"><label for="app-language">{{t('language')}}</label><select id="app-language" :value="language" :disabled="languageBusy" @change="changeLanguage"><option v-for="item in languages" :key="item.code" :value="item.code">{{item.name}}</option></select></div>
-        <label class="steamvr-lifecycle"><input type="checkbox" :checked="snap.steamvrLifecycle" :disabled="lifecycleBusy" @change="changeSteamvrLifecycle"/><span>{{t('steamvrLifecycle')}}</span></label>
+        <label class="steamvr-lifecycle"><span>{{t('steamvrLifecycle')}}</span><input type="checkbox" role="switch" :checked="snap.steamvrLifecycle" :disabled="lifecycleBusy" @change="changeSteamvrLifecycle"/></label>
         <button type="button" class="module-link" @click="openModule">
           <b>{{t('moduleRequired')}}</b>
           <span>github.com/Lateir/qptp-module ↗</span>

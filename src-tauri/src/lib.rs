@@ -15,7 +15,7 @@ const HAPTIC_DURATION_MS: u16 = 2;
 #[serde(default, rename_all = "camelCase")]
 struct UserConfig { transport: String, input_mode: String, press_threshold: f32, haptic_amplitude: f32, language: String, steamvr_lifecycle: bool }
 impl Default for UserConfig {
-    fn default()->Self { Self { transport:"usb".into(), input_mode:"touchpad".into(), press_threshold:0.30, haptic_amplitude:0.20, language:system_language().into(), steamvr_lifecycle:true } }
+    fn default()->Self { Self { transport:"lan".into(), input_mode:"touchpad".into(), press_threshold:0.30, haptic_amplitude:0.20, language:system_language().into(), steamvr_lifecycle:true } }
 }
 fn valid_mode(mode:&str)->bool {matches!(mode,"touchpad"|"button"|"two_buttons")}
 fn valid_language(language:&str)->bool {matches!(language,"ru"|"en"|"zh-CN"|"hi"|"es"|"ar"|"fr"|"bn"|"pt-BR"|"id"|"ja"|"de")}
@@ -61,7 +61,7 @@ struct Snapshot {
     steamvr_connected: bool, steamvr_lifecycle: bool,
 }
 impl Default for Snapshot {
-    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"usb".into(), endpoint:None, protocol:None, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,haptic_amplitude:0.20,language:"ru".into(),left_buttons:[false;2],right_buttons:[false;2],steamvr_connected:false,steamvr_lifecycle:true } }
+    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"lan".into(), endpoint:None, protocol:None, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,haptic_amplitude:0.20,language:"ru".into(),left_buttons:[false;2],right_buttons:[false;2],steamvr_connected:false,steamvr_lifecycle:true } }
 }
 struct StreamState { snapshot: Mutex<Snapshot>, config_lock: Mutex<()>, generation: AtomicU64, adb_used: AtomicBool }
 type Shared = Arc<StreamState>;
@@ -261,7 +261,7 @@ fn load_user_config(app:&AppHandle)->UserConfig{
         if let Some(transport)=transport_file(app).and_then(|f|std::fs::read_to_string(f).ok()){config.transport=transport.trim().into()}
         config
     });
-    if config.transport!="usb"&&config.transport!="lan"{config.transport="usb".into()}
+    if config.transport!="usb"&&config.transport!="lan"{config.transport="lan".into()}
     if !valid_mode(&config.input_mode){config.input_mode="touchpad".into()}
     if !valid_threshold(config.press_threshold){config.press_threshold=0.30}
     if !config.haptic_amplitude.is_finite()||!(0.0..=1.0).contains(&config.haptic_amplitude){config.haptic_amplitude=0.20}
@@ -464,6 +464,7 @@ mod tests {
     #[test]
     fn config_defaults_missing_fields(){
         let config:UserConfig=serde_json::from_str("{}").unwrap();
+        assert_eq!(config.transport,"lan");
         assert_eq!(config.input_mode,"touchpad");
         assert_eq!(config.press_threshold,0.30);
         assert_eq!(config.haptic_amplitude,0.20);
