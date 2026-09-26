@@ -1,10 +1,21 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{io::{self, Read}, net::{TcpStream, UdpSocket}, path::PathBuf, process::Command, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc, Mutex}, thread, time::{Duration, Instant}};
+use std::{io::{self, Read, Write}, net::{TcpStream, UdpSocket}, path::{Path, PathBuf}, process::Command, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc, Mutex}, thread, time::{Duration, Instant}};
 use tauri::{image::Image, menu::{IconMenuItem, Menu, MenuItem, PredefinedMenuItem}, tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}, AppHandle, Emitter, Manager, RunEvent, State, WindowEvent, Wry};
 
 const PORT: u16 = 27182;
 const DISCOVERY_PORT: u16 = 27183;
+const RELEASE_THRESHOLD: f32 = 0.20;
+const HAPTIC_DURATION_MS: u16 = 2;
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+struct UserConfig { transport: String, input_mode: String, press_threshold: f32, haptic_amplitude: f32 }
+impl Default for UserConfig {
+    fn default()->Self { Self { transport:"usb".into(), input_mode:"touchpad".into(), press_threshold:0.30, haptic_amplitude:0.20 } }
+}
+fn valid_mode(mode:&str)->bool {matches!(mode,"touchpad"|"button"|"two_buttons")}
+fn valid_threshold(value:f32)->bool {value.is_finite()&&value>RELEASE_THRESHOLD&&value<=1.0}
 
 #[derive(Clone, Default, Serialize)]
 struct Sensor { x: u16, y: u16, force: f32 }
@@ -13,11 +24,12 @@ struct Sensor { x: u16, y: u16, force: f32 }
 struct Snapshot {
     phase: String, message: String, transport: String, endpoint: Option<String>,
     protocol: Option<String>, samples: u64, left: Sensor, right: Sensor, status: Option<Value>,
+    input_mode: String, press_threshold: f32, haptic_amplitude: f32, left_buttons: [bool;2], right_buttons: [bool;2],
 }
 impl Default for Snapshot {
-    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"usb".into(), endpoint:None, protocol:None, samples:0, left:Sensor::default(), right:Sensor::default(), status:None } }
+    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"usb".into(), endpoint:None, protocol:None, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,haptic_amplitude:0.20,left_buttons:[false;2],right_buttons:[false;2] } }
 }
-struct StreamState { snapshot: Mutex<Snapshot>, generation: AtomicU64, adb_used: AtomicBool }
+struct StreamState { snapshot: Mutex<Snapshot>, config_lock: Mutex<()>, generation: AtomicU64, adb_used: AtomicBool }
 type Shared = Arc<StreamState>;
 struct Tray { left: IconMenuItem<Wry>, right: IconMenuItem<Wry>, last: Mutex<Option<(bool,bool)>> }
 
@@ -101,12 +113,38 @@ fn sensor(b:&[u8])->Sensor{
     // Module's Y axis is inverted relative to the pad; flip so 0 is the top.
     Sensor{x:u16::from_le_bytes([b[0],b[1]]),y:255u16.saturating_sub(u16::from_le_bytes([b[2],b[3]])),force:f32::from_le_bytes(b[4..8].try_into().unwrap())}
 }
+fn button_step(previous:[bool;2], sensor:&Sensor, mode:&str, press_threshold:f32)->[bool;2]{
+    // Raw (0, 0) is no touch. The decoded Y axis is flipped, so idle is (0, 255).
+    if mode=="touchpad" || (sensor.x==0&&sensor.y==255) || !sensor.force.is_finite() || sensor.force<=RELEASE_THRESHOLD {return [false;2]}
+    if previous[0]||previous[1] {return previous} // Keep the chosen half until release.
+    if sensor.force<press_threshold {return [false;2]}
+    if mode=="two_buttons" {[sensor.y<128,sensor.y>=128]} else {[true,false]}
+}
+fn send_thumb_pulse(stream:&mut TcpStream,side:u8,sequence:u32,amplitude:u8)->io::Result<()> {
+    let mut command=[0u8;16];
+    command[..4].copy_from_slice(b"QPC1");command[4]=1;command[5]=side;command[6]=2;command[7]=amplitude;
+    command[8..10].copy_from_slice(&HAPTIC_DURATION_MS.to_le_bytes());command[10..14].copy_from_slice(&sequence.to_le_bytes());
+    stream.write_all(&command)
+}
+fn new_press(previous:[bool;2],current:[bool;2])->bool {
+    !previous.iter().any(|&pressed|pressed) && current.iter().any(|&pressed|pressed)
+}
+fn haptic_ready(press:bool,pending:Option<u32>,amplitude:u8)->bool{press&&pending.is_none()&&amplitude>0}
+fn acknowledge_haptic(pending:&mut [Option<u32>;2],request_id:u32){
+    for item in pending {if *item==Some(request_id){*item=None;}}
+}
 fn read_frame(stream:&mut TcpStream, app:&AppHandle, state:&Shared, generation:u64)->io::Result<()>{
-    let mut header=[0u8;4];let mut last_emit=Instant::now()-Duration::from_secs(1);
+    let mut header=[0u8;4];let mut last_emit=Instant::now()-Duration::from_secs(1);let mut haptic_sequence=0u32;
+    let mut pending_haptics:[Option<u32>;2]=[None,None];
     loop {
         if state.generation.load(Ordering::SeqCst)!=generation{return Ok(())}
         read_exact_checked(stream,&mut header,state,generation)?;
         match &header {
+            b"QPA1"=>{
+                let mut body=[0u8;12];read_exact_checked(stream,&mut body,state,generation)?;
+                let request_id=u32::from_le_bytes(body[..4].try_into().unwrap());
+                acknowledge_haptic(&mut pending_haptics,request_id);
+            }
             b"QPS1"=>{
                 let mut size=[0u8;4];read_exact_checked(stream,&mut size,state,generation)?;
                 let size=u32::from_le_bytes(size) as usize;
@@ -114,13 +152,29 @@ fn read_frame(stream:&mut TcpStream, app:&AppHandle, state:&Shared, generation:u
                 let mut body=vec![0u8;size];read_exact_checked(stream,&mut body,state,generation)?;
                 let status:Value=serde_json::from_slice(&body).map_err(io::Error::other)?;
                 if state.generation.load(Ordering::SeqCst)!=generation {return Ok(())}
-                publish(app,state,|s|{s.status=Some(status);s.phase="connected".into();s.message="Поток сенсоров активен".into();s.protocol=Some("QPR2 / QPS1".into())});
+                publish(app,state,|s|{s.status=Some(status);s.phase="connected".into();s.message="Поток сенсоров активен".into();s.protocol=Some("QPR2 / QPS1".into());if !controller_connected(s,"left"){s.left_buttons=[false;2]}if !controller_connected(s,"right"){s.right_buttons=[false;2]}});
             }
             b"QPR2"=>{
                 let mut body=[0u8;28];read_exact_checked(stream,&mut body,state,generation)?;
                 if state.generation.load(Ordering::SeqCst)!=generation {return Ok(())}
                 let (left,right)=(sensor(&body[12..20]),sensor(&body[20..28]));
-                if let Ok(mut s)=state.snapshot.lock(){s.left=left;s.right=right;s.samples+=1;s.phase="connected".into();s.message="Поток сенсоров активен".into();s.protocol=Some("QPR2 / QPS1".into());if last_emit.elapsed()>=Duration::from_millis(33){let _=app.emit("stream-state",s.clone());last_emit=Instant::now()}}
+                let mut pulses=[false;2];let mut amplitude=0u8;
+                if let Ok(mut s)=state.snapshot.lock(){
+                    let previous=(s.left_buttons,s.right_buttons);
+                    s.left=left;s.right=right;s.samples+=1;s.phase="connected".into();s.message="Поток сенсоров активен".into();s.protocol=Some("QPR2 / QPS1".into());
+                    s.left_buttons=if s.status.is_none()||controller_connected(&s,"left"){button_step(previous.0,&s.left,&s.input_mode,s.press_threshold)}else{[false;2]};
+                    s.right_buttons=if s.status.is_none()||controller_connected(&s,"right"){button_step(previous.1,&s.right,&s.input_mode,s.press_threshold)}else{[false;2]};
+                    pulses=[new_press(previous.0,s.left_buttons),new_press(previous.1,s.right_buttons)];
+                    amplitude=(s.haptic_amplitude*255.0).round() as u8;
+                    if previous!=(s.left_buttons,s.right_buttons)||last_emit.elapsed()>=Duration::from_millis(33){let _=app.emit("stream-state",s.clone());last_emit=Instant::now()}
+                }
+                for (side,pulse) in pulses.into_iter().enumerate(){
+                    if haptic_ready(pulse,pending_haptics[side],amplitude){
+                        haptic_sequence=haptic_sequence.wrapping_add(1);
+                        send_thumb_pulse(stream,side as u8,haptic_sequence,amplitude)?;
+                        pending_haptics[side]=Some(haptic_sequence);
+                    }
+                }
             }
             _=>return Err(io::Error::new(io::ErrorKind::InvalidData,"Неизвестный формат потока"))
         }
@@ -130,7 +184,7 @@ fn worker(app:AppHandle,state:Shared,generation:u64,transport:String){
     let mut owned_forward:Option<PathBuf>=None;
     loop {
         if state.generation.load(Ordering::SeqCst)!=generation {break}
-        publish(&app,&state,|s|{s.phase="searching".into();s.message=if transport=="usb"{"Поиск Quest через ADB…".into()}else{"Поиск Quest в локальной сети…".into()};s.status=None;s.endpoint=None;s.protocol=None;s.left=Sensor::default();s.right=Sensor::default()});
+        publish(&app,&state,|s|{s.phase="searching".into();s.message=if transport=="usb"{"Поиск Quest через ADB…".into()}else{"Поиск Quest в локальной сети…".into()};s.status=None;s.endpoint=None;s.protocol=None;s.left=Sensor::default();s.right=Sensor::default();s.left_buttons=[false;2];s.right_buttons=[false;2]});
         let endpoint=if transport=="usb"{
             match adb_forward(&app,&state){Ok((adb,owns))=>{if owns{owned_forward=Some(adb)};Ok(format!("127.0.0.1:{PORT}"))},Err(e)=>Err(e)}
         }else{discover().map_err(|e|e.to_string())};
@@ -156,9 +210,33 @@ fn worker(app:AppHandle,state:Shared,generation:u64,transport:String){
     }
 }
 fn transport_file(app:&AppHandle)->Option<PathBuf>{app.path().app_config_dir().ok().map(|d|d.join("transport"))}
+fn config_file(app:&AppHandle)->Result<PathBuf,String>{app.path().app_config_dir().map(|d|d.join("config.json")).map_err(|e|e.to_string())}
+fn read_user_config_file(file:&Path)->Option<UserConfig>{std::fs::read(file).ok().and_then(|bytes|serde_json::from_slice(&bytes).ok())}
+fn write_user_config_file(file:&Path,config:&UserConfig)->Result<(),String>{
+    std::fs::create_dir_all(file.parent().ok_or("Неверный путь конфигурации")?).map_err(|e|e.to_string())?;
+    let json=serde_json::to_vec_pretty(config).map_err(|e|e.to_string())?;
+    std::fs::write(file,json).map_err(|e|format!("Не удалось сохранить настройки: {e}"))
+}
+fn load_user_config(app:&AppHandle)->UserConfig{
+    let mut config=config_file(app).ok().and_then(|f|read_user_config_file(&f)).unwrap_or_else(||{
+        let mut config=UserConfig::default();
+        if let Some(transport)=transport_file(app).and_then(|f|std::fs::read_to_string(f).ok()){config.transport=transport.trim().into()}
+        config
+    });
+    if config.transport!="usb"&&config.transport!="lan"{config.transport="usb".into()}
+    if !valid_mode(&config.input_mode){config.input_mode="touchpad".into()}
+    if !valid_threshold(config.press_threshold){config.press_threshold=0.30}
+    if !config.haptic_amplitude.is_finite()||!(0.0..=1.0).contains(&config.haptic_amplitude){config.haptic_amplitude=0.20}
+    config
+}
+fn save_user_config(app:&AppHandle,config:&UserConfig)->Result<(),String>{
+    let file=config_file(app)?;
+    write_user_config_file(&file,config)
+}
+fn config_from_snapshot(s:&Snapshot)->UserConfig{UserConfig{transport:s.transport.clone(),input_mode:s.input_mode.clone(),press_threshold:s.press_threshold,haptic_amplitude:s.haptic_amplitude}}
 fn start_worker(app:&AppHandle,state:&Shared,transport:String){
     let generation=state.generation.fetch_add(1,Ordering::SeqCst)+1;
-    publish(app,state,|s|{*s=Snapshot{transport:transport.clone(),..Snapshot::default()}});
+    publish(app,state,|s|{let input_mode=s.input_mode.clone();let press_threshold=s.press_threshold;let haptic_amplitude=s.haptic_amplitude;*s=Snapshot{transport:transport.clone(),input_mode,press_threshold,haptic_amplitude,..Snapshot::default()}});
     let (app,shared)=(app.clone(),state.clone());thread::spawn(move||worker(app,shared,generation,transport));
 }
 #[tauri::command]
@@ -166,9 +244,49 @@ fn get_stream_state(state:State<Shared>)->Snapshot{state.snapshot.lock().unwrap(
 #[tauri::command]
 fn set_transport(app:AppHandle,state:State<Shared>,transport:String)->Result<(),String>{
     if transport!="usb"&&transport!="lan"{return Err("Неизвестный способ подключения".into())}
+    let _guard=state.config_lock.lock().map_err(|e|e.to_string())?;
     if state.snapshot.lock().map(|s|s.transport==transport).unwrap_or(false){return Ok(())}
-    if let Some(f)=transport_file(&app){let _=f.parent().map(std::fs::create_dir_all);let _=std::fs::write(f,&transport);}
+    let mut config=state.snapshot.lock().map(|s|config_from_snapshot(&s)).map_err(|e|e.to_string())?;
+    config.transport=transport.clone();save_user_config(&app,&config)?;
     start_worker(&app,state.inner(),transport);Ok(())
+}
+#[tauri::command]
+fn set_input_mode(app:AppHandle,state:State<Shared>,mode:String)->Result<(),String>{
+    if !valid_mode(&mode){return Err("Неизвестный режим".into())}
+    let _guard=state.config_lock.lock().map_err(|e|e.to_string())?;
+    let mut config=state.snapshot.lock().map(|s|config_from_snapshot(&s)).map_err(|e|e.to_string())?;
+    if config.input_mode==mode{return Ok(())}
+    config.input_mode=mode.clone();save_user_config(&app,&config)?;
+    publish(&app,state.inner(),|s|{s.input_mode=mode;s.left_buttons=[false;2];s.right_buttons=[false;2]});Ok(())
+}
+#[tauri::command]
+fn set_press_threshold(app:AppHandle,state:State<Shared>,threshold:f32)->Result<(),String>{
+    if !valid_threshold(threshold){return Err("Порог нажатия должен быть больше 0.20 и не больше 1.00".into())}
+    let _guard=state.config_lock.lock().map_err(|e|e.to_string())?;
+    let threshold=(threshold*100.0).round()/100.0;
+    let mut config=state.snapshot.lock().map(|s|config_from_snapshot(&s)).map_err(|e|e.to_string())?;
+    if (config.press_threshold-threshold).abs()<0.001{return Ok(())}
+    config.press_threshold=threshold;save_user_config(&app,&config)?;
+    publish(&app,state.inner(),|s|s.press_threshold=threshold);Ok(())
+}
+#[tauri::command]
+fn set_haptic_amplitude(app:AppHandle,state:State<Shared>,amplitude:f32)->Result<(),String>{
+    if !amplitude.is_finite()||!(0.0..=1.0).contains(&amplitude){return Err("Мощность вибрации должна быть от 0 до 1".into())}
+    let _guard=state.config_lock.lock().map_err(|e|e.to_string())?;
+    let amplitude=(amplitude*100.0).round()/100.0;
+    let mut config=state.snapshot.lock().map(|s|config_from_snapshot(&s)).map_err(|e|e.to_string())?;
+    if (config.haptic_amplitude-amplitude).abs()<0.001{return Ok(())}
+    config.haptic_amplitude=amplitude;save_user_config(&app,&config)?;
+    publish(&app,state.inner(),|s|s.haptic_amplitude=amplitude);Ok(())
+}
+#[tauri::command]
+fn open_module_page()->Result<(),String>{
+    const URL:&str="https://github.com/Lateir/qptp-module";
+    let wide:Vec<u16>=URL.encode_utf16().chain(std::iter::once(0)).collect();
+    let result=unsafe{windows_sys::Win32::UI::Shell::ShellExecuteW(
+        std::ptr::null_mut(),std::ptr::null(),wide.as_ptr(),std::ptr::null(),std::ptr::null(),1
+    )};
+    if (result as isize)<=32 {Err(format!("Не удалось открыть браузер (код {})",result as isize))}else{Ok(())}
 }
 fn show_window(app:&AppHandle){
     if let Some(w)=app.get_webview_window("main"){let _=w.unminimize();let _=w.show();let _=w.set_focus();return}
@@ -189,12 +307,15 @@ fn setup_tray(app:&AppHandle)->tauri::Result<()>{
     Ok(())
 }
 pub fn run(){
-    let state:Shared=Arc::new(StreamState{snapshot:Mutex::new(Snapshot::default()),generation:AtomicU64::new(0),adb_used:AtomicBool::new(false)});
+    let state:Shared=Arc::new(StreamState{snapshot:Mutex::new(Snapshot::default()),config_lock:Mutex::new(()),generation:AtomicU64::new(0),adb_used:AtomicBool::new(false)});
     tauri::Builder::default().manage(state)
         .setup(|app|{
             let handle=app.handle().clone();
             setup_tray(&handle)?;
-            let transport=transport_file(&handle).and_then(|f|std::fs::read_to_string(f).ok()).map(|t|t.trim().to_owned()).filter(|t|t=="usb"||t=="lan").unwrap_or_else(||"usb".into());
+            let config=load_user_config(&handle);
+            let _=save_user_config(&handle,&config);
+            let transport=config.transport.clone();
+            if let Ok(mut snapshot)=handle.state::<Shared>().snapshot.lock(){snapshot.input_mode=config.input_mode;snapshot.press_threshold=config.press_threshold;snapshot.haptic_amplitude=config.haptic_amplitude;}
             start_worker(&handle,handle.state::<Shared>().inner(),transport);
             Ok(())
         })
@@ -204,7 +325,7 @@ pub fn run(){
             WindowEvent::CloseRequested{..}=>window.app_handle().exit(0),
             _=>{}
         })
-        .invoke_handler(tauri::generate_handler![get_stream_state,set_transport])
+        .invoke_handler(tauri::generate_handler![get_stream_state,set_transport,set_input_mode,set_press_threshold,set_haptic_amplitude,open_module_page])
         .build(tauri::generate_context!()).expect("tauri application error")
         .run(|app,event|match event{
             // Destroying the last window (tray mode) must not quit the app; explicit exit passes a code.
@@ -215,4 +336,63 @@ pub fn run(){
             }
             _=>{}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn sample(y:u16,force:f32)->Sensor{Sensor{x:80,y,force}}
+    #[test]
+    fn button_hysteresis(){
+        let idle=[false;2];
+        assert_eq!(button_step(idle,&sample(80,0.29),"button",0.30),idle);
+        let pressed=button_step(idle,&sample(80,0.30),"button",0.30);
+        assert_eq!(pressed,[true,false]);
+        assert_eq!(button_step(pressed,&sample(80,0.21),"button",0.30),pressed);
+        assert_eq!(button_step(pressed,&sample(80,0.20),"button",0.30),idle);
+    }
+    #[test]
+    fn two_buttons_latch_the_initial_half(){
+        let left=button_step([false;2],&sample(127,0.35),"two_buttons",0.30);
+        assert_eq!(left,[true,false]);
+        assert_eq!(button_step(left,&sample(200,0.35),"two_buttons",0.30),left);
+        assert_eq!(button_step([false;2],&sample(128,0.35),"two_buttons",0.30),[false,true]);
+        assert_eq!(button_step(left,&Sensor{x:0,y:255,force:0.35},"two_buttons",0.30),[false;2]);
+        assert_eq!(button_step(left,&sample(80,0.35),"touchpad",0.30),[false;2]);
+    }
+    #[test]
+    fn config_defaults_missing_fields(){
+        let config:UserConfig=serde_json::from_str("{}").unwrap();
+        assert_eq!(config.input_mode,"touchpad");
+        assert_eq!(config.press_threshold,0.30);
+        assert_eq!(config.haptic_amplitude,0.20);
+    }
+    #[test]
+    fn haptics_only_on_new_press_and_one_outstanding_request_per_controller(){
+        assert!(new_press([false;2],[true,false]));
+        assert!(!new_press([true,false],[false;2]));
+        assert!(!new_press([true,false],[false,true]));
+        let mut pending=[Some(7),Some(8)];
+        assert!(!haptic_ready(true,pending[0],51));
+        assert!(!haptic_ready(true,None,0));
+        assert!(!haptic_ready(false,None,51));
+        acknowledge_haptic(&mut pending,8);
+        assert_eq!(pending,[Some(7),None]);
+        assert!(haptic_ready(true,pending[1],51));
+        acknowledge_haptic(&mut pending,7);
+        assert_eq!(pending,[None,None]);
+    }
+    #[test]
+    fn config_round_trip(){
+        let dir=std::env::temp_dir().join(format!("qptp-config-test-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let file=dir.join("config.json");
+        let config=UserConfig{transport:"lan".into(),input_mode:"two_buttons".into(),press_threshold:0.45,haptic_amplitude:0.65};
+        write_user_config_file(&file,&config).unwrap();
+        let loaded=read_user_config_file(&file).unwrap();
+        assert_eq!(loaded.transport,config.transport);
+        assert_eq!(loaded.input_mode,config.input_mode);
+        assert_eq!(loaded.press_threshold,config.press_threshold);
+        assert_eq!(loaded.haptic_amplitude,config.haptic_amplitude);
+        std::fs::remove_file(file).unwrap();std::fs::remove_dir(dir).unwrap();
+    }
 }

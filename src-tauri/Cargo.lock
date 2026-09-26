@@ -2412,7 +2412,7 @@ dependencies = [
 
 [[package]]
 name = "qptp"
-version = "0.1.0"
+version = "0.0.0"
 dependencies = [
  "log",
  "serde",
@@ -2420,6 +2420,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-log",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
