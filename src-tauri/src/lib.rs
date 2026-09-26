@@ -13,9 +13,9 @@ const HAPTIC_DURATION_MS: u16 = 2;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
-struct UserConfig { transport: String, input_mode: String, press_threshold: f32, haptic_amplitude: f32, language: String }
+struct UserConfig { transport: String, input_mode: String, press_threshold: f32, haptic_amplitude: f32, language: String, steamvr_lifecycle: bool }
 impl Default for UserConfig {
-    fn default()->Self { Self { transport:"usb".into(), input_mode:"touchpad".into(), press_threshold:0.30, haptic_amplitude:0.20, language:system_language().into() } }
+    fn default()->Self { Self { transport:"usb".into(), input_mode:"touchpad".into(), press_threshold:0.30, haptic_amplitude:0.20, language:system_language().into(), steamvr_lifecycle:true } }
 }
 fn valid_mode(mode:&str)->bool {matches!(mode,"touchpad"|"button"|"two_buttons")}
 fn valid_language(language:&str)->bool {matches!(language,"ru"|"en"|"zh-CN"|"hi"|"es"|"ar"|"fr"|"bn"|"pt-BR"|"id"|"ja"|"de")}
@@ -58,10 +58,10 @@ struct Snapshot {
     phase: String, message: String, transport: String, endpoint: Option<String>,
     protocol: Option<String>, samples: u64, left: Sensor, right: Sensor, status: Option<Value>,
     input_mode: String, press_threshold: f32, haptic_amplitude: f32, language: String, left_buttons: [bool;2], right_buttons: [bool;2],
-    steamvr_connected: bool,
+    steamvr_connected: bool, steamvr_lifecycle: bool,
 }
 impl Default for Snapshot {
-    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"usb".into(), endpoint:None, protocol:None, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,haptic_amplitude:0.20,language:"ru".into(),left_buttons:[false;2],right_buttons:[false;2],steamvr_connected:false } }
+    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"usb".into(), endpoint:None, protocol:None, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,haptic_amplitude:0.20,language:"ru".into(),left_buttons:[false;2],right_buttons:[false;2],steamvr_connected:false,steamvr_lifecycle:true } }
 }
 struct StreamState { snapshot: Mutex<Snapshot>, config_lock: Mutex<()>, generation: AtomicU64, adb_used: AtomicBool }
 type Shared = Arc<StreamState>;
@@ -250,7 +250,10 @@ fn read_user_config_file(file:&Path)->Option<UserConfig>{std::fs::read(file).ok(
 fn write_user_config_file(file:&Path,config:&UserConfig)->Result<(),String>{
     std::fs::create_dir_all(file.parent().ok_or("Неверный путь конфигурации")?).map_err(|e|e.to_string())?;
     let json=serde_json::to_vec_pretty(config).map_err(|e|e.to_string())?;
-    std::fs::write(file,json).map_err(|e|format!("Не удалось сохранить настройки: {e}"))
+    std::fs::write(file,json).map_err(|e|format!("Не удалось сохранить настройки: {e}"))?;
+    // The driver reads this tiny flag before it launches the desktop application.
+    std::fs::write(file.with_file_name("steamvr_lifecycle"),if config.steamvr_lifecycle{"1"}else{"0"})
+        .map_err(|e|format!("Не удалось сохранить автозапуск SteamVR: {e}"))
 }
 fn load_user_config(app:&AppHandle)->UserConfig{
     let mut config=config_file(app).ok().and_then(|f|read_user_config_file(&f)).unwrap_or_else(||{
@@ -269,10 +272,10 @@ fn save_user_config(app:&AppHandle,config:&UserConfig)->Result<(),String>{
     let file=config_file(app)?;
     write_user_config_file(&file,config)
 }
-fn config_from_snapshot(s:&Snapshot)->UserConfig{UserConfig{transport:s.transport.clone(),input_mode:s.input_mode.clone(),press_threshold:s.press_threshold,haptic_amplitude:s.haptic_amplitude,language:s.language.clone()}}
+fn config_from_snapshot(s:&Snapshot)->UserConfig{UserConfig{transport:s.transport.clone(),input_mode:s.input_mode.clone(),press_threshold:s.press_threshold,haptic_amplitude:s.haptic_amplitude,language:s.language.clone(),steamvr_lifecycle:s.steamvr_lifecycle}}
 fn start_worker(app:&AppHandle,state:&Shared,transport:String){
     let generation=state.generation.fetch_add(1,Ordering::SeqCst)+1;
-    publish(app,state,|s|{let input_mode=s.input_mode.clone();let press_threshold=s.press_threshold;let haptic_amplitude=s.haptic_amplitude;let language=s.language.clone();*s=Snapshot{transport:transport.clone(),input_mode,press_threshold,haptic_amplitude,language,..Snapshot::default()}});
+    publish(app,state,|s|{let input_mode=s.input_mode.clone();let press_threshold=s.press_threshold;let haptic_amplitude=s.haptic_amplitude;let language=s.language.clone();let steamvr_lifecycle=s.steamvr_lifecycle;*s=Snapshot{transport:transport.clone(),input_mode,press_threshold,haptic_amplitude,language,steamvr_lifecycle,..Snapshot::default()}});
     let (app,shared)=(app.clone(),state.clone());thread::spawn(move||worker(app,shared,generation,transport));
 }
 #[tauri::command]
@@ -324,6 +327,32 @@ fn set_language(app:AppHandle,state:State<Shared>,language:String)->Result<(),St
     config.language=language.clone();save_user_config(&app,&config)?;
     if let Some(tray)=app.try_state::<Tray>(){let (show,quit)=tray_labels(&language);let _=tray.show.set_text(show);let _=tray.quit.set_text(quit);}
     publish(&app,state.inner(),|s|s.language=language);Ok(())
+}
+#[tauri::command]
+fn set_steamvr_lifecycle(app:AppHandle,state:State<Shared>,enabled:bool)->Result<(),String>{
+    let _guard=state.config_lock.lock().map_err(|e|e.to_string())?;
+    let mut config=state.snapshot.lock().map(|s|config_from_snapshot(&s)).map_err(|e|e.to_string())?;
+    if config.steamvr_lifecycle==enabled{return Ok(())}
+    config.steamvr_lifecycle=enabled;
+    save_user_config(&app,&config)?;
+    publish(&app,state.inner(),|s|s.steamvr_lifecycle=enabled);
+    Ok(())
+}
+fn watch_steamvr_lifecycle(app:AppHandle,state:Shared){
+    thread::spawn(move||{
+        let mut was_connected=false;
+        let mut lost_at:Option<Instant>=None;
+        loop{
+            thread::sleep(Duration::from_millis(500));
+            let Ok(snapshot)=state.snapshot.lock() else {continue};
+            if !snapshot.steamvr_lifecycle {was_connected=false;lost_at=None;continue}
+            if snapshot.steamvr_connected {was_connected=true;lost_at=None;continue}
+            if was_connected {
+                let since=lost_at.get_or_insert_with(Instant::now);
+                if since.elapsed()>=Duration::from_secs(5){drop(snapshot);app.exit(0);return}
+            }
+        }
+    });
 }
 #[tauri::command]
 fn open_module_page()->Result<(),String>{
@@ -381,8 +410,9 @@ pub fn run(){
             setup_tray(&handle,&config.language)?;
             let _=save_user_config(&handle,&config);
             let transport=config.transport.clone();
-            if let Ok(mut snapshot)=handle.state::<Shared>().snapshot.lock(){snapshot.input_mode=config.input_mode;snapshot.press_threshold=config.press_threshold;snapshot.haptic_amplitude=config.haptic_amplitude;snapshot.language=config.language;}
+            if let Ok(mut snapshot)=handle.state::<Shared>().snapshot.lock(){snapshot.input_mode=config.input_mode;snapshot.press_threshold=config.press_threshold;snapshot.haptic_amplitude=config.haptic_amplitude;snapshot.language=config.language;snapshot.steamvr_lifecycle=config.steamvr_lifecycle;}
             start_worker(&handle,handle.state::<Shared>().inner(),transport);
+            watch_steamvr_lifecycle(handle.clone(),handle.state::<Shared>().inner().clone());
             #[cfg(all(windows, not(debug_assertions)))]
             thread::spawn(||{let _=steamvr_install::ensure_registered();});
             if starts_in_tray(&handle){
@@ -396,7 +426,7 @@ pub fn run(){
             WindowEvent::CloseRequested{..}=>window.app_handle().exit(0),
             _=>{}
         })
-        .invoke_handler(tauri::generate_handler![get_stream_state,set_transport,set_input_mode,set_press_threshold,set_haptic_amplitude,set_language,open_module_page])
+        .invoke_handler(tauri::generate_handler![get_stream_state,set_transport,set_input_mode,set_press_threshold,set_haptic_amplitude,set_language,set_steamvr_lifecycle,open_module_page])
         .build(tauri::generate_context!()).expect("tauri application error")
         .run(|app,event|match event{
             // Destroying the last window (tray mode) must not quit the app; explicit exit passes a code.
@@ -466,7 +496,7 @@ mod tests {
     fn config_round_trip(){
         let dir=std::env::temp_dir().join(format!("qptp-config-test-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         let file=dir.join("config.json");
-        let config=UserConfig{transport:"lan".into(),input_mode:"two_buttons".into(),press_threshold:0.45,haptic_amplitude:0.65,language:"ja".into()};
+        let config=UserConfig{transport:"lan".into(),input_mode:"two_buttons".into(),press_threshold:0.45,haptic_amplitude:0.65,language:"ja".into(),steamvr_lifecycle:false};
         write_user_config_file(&file,&config).unwrap();
         let loaded=read_user_config_file(&file).unwrap();
         assert_eq!(loaded.transport,config.transport);
@@ -474,7 +504,9 @@ mod tests {
         assert_eq!(loaded.press_threshold,config.press_threshold);
         assert_eq!(loaded.haptic_amplitude,config.haptic_amplitude);
         assert_eq!(loaded.language,config.language);
-        std::fs::remove_file(file).unwrap();std::fs::remove_dir(dir).unwrap();
+        assert!(!loaded.steamvr_lifecycle);
+        assert_eq!(std::fs::read_to_string(dir.join("steamvr_lifecycle")).unwrap(),"0");
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn supported_languages_are_validated(){

@@ -9,12 +9,12 @@ import { detectLanguage, isLanguage, languages, translate, type Language, type T
 type Mode = 'usb' | 'lan'
 type InputMode = 'touchpad' | 'button' | 'two_buttons'
 type Side = { x:number; y:number; force:number }
-type Snapshot = { phase:string; message:string; transport:Mode; endpoint?:string; protocol?:string; samples:number; left:Side; right:Side; status?:Record<string,unknown>; inputMode:InputMode; pressThreshold:number; hapticAmplitude:number; language:Language; leftButtons:[boolean,boolean]; rightButtons:[boolean,boolean]; steamvrConnected:boolean }
+type Snapshot = { phase:string; message:string; transport:Mode; endpoint?:string; protocol?:string; samples:number; left:Side; right:Side; status?:Record<string,unknown>; inputMode:InputMode; pressThreshold:number; hapticAmplitude:number; language:Language; leftButtons:[boolean,boolean]; rightButtons:[boolean,boolean]; steamvrConnected:boolean; steamvrLifecycle:boolean }
 const zero={x:0,y:0,force:0}
-const snap=ref<Snapshot>({phase:'searching',message:'Поиск устройства…',transport:'usb',samples:0,left:zero,right:zero,inputMode:'touchpad',pressThreshold:0.30,hapticAmplitude:0.20,language:'ru',leftButtons:[false,false],rightButtons:[false,false],steamvrConnected:false})
+const snap=ref<Snapshot>({phase:'searching',message:'Поиск устройства…',transport:'usb',samples:0,left:zero,right:zero,inputMode:'touchpad',pressThreshold:0.30,hapticAmplitude:0.20,language:'ru',leftButtons:[false,false],rightButtons:[false,false],steamvrConnected:false,steamvrLifecycle:true})
 const mode=ref<Mode>('usb'),tab=ref<'mode'|'status'|'settings'>('status'),busy=ref(false)
 const inputBusy=ref(false),inputError=ref('')
-const linkError=ref(''),settingsError=ref(''),languageBusy=ref(false)
+const linkError=ref(''),settingsError=ref(''),languageBusy=ref(false),lifecycleBusy=ref(false)
 const storedLanguage=localStorage.getItem('qptp-language')||''
 const language=ref<Language>(isLanguage(storedLanguage)?storedLanguage:detectLanguage(navigator.languages?.length?navigator.languages:[navigator.language]))
 const t=(key:TranslationKey)=>translate(language.value,key)
@@ -29,6 +29,7 @@ async function selectInputMode(next:InputMode){if(next===snap.value.inputMode)re
 async function savePressThreshold(threshold:number){inputError.value='';if(!isTauri()){snap.value={...snap.value,pressThreshold:threshold};return}inputBusy.value=true;try{await invoke('set_press_threshold',{threshold})}catch(e){inputError.value=String(e)}finally{inputBusy.value=false}}
 async function saveHapticAmplitude(amplitude:number){inputError.value='';if(!isTauri()){snap.value={...snap.value,hapticAmplitude:amplitude};return}inputBusy.value=true;try{await invoke('set_haptic_amplitude',{amplitude})}catch(e){inputError.value=String(e)}finally{inputBusy.value=false}}
 async function changeLanguage(event:Event){const next=(event.target as HTMLSelectElement).value;if(!isLanguage(next)||next===language.value)return;settingsError.value='';languageBusy.value=true;try{if(isTauri())await invoke('set_language',{language:next});language.value=next;snap.value={...snap.value,language:next}}catch{settingsError.value=t('saveError');(event.target as HTMLSelectElement).value=language.value}finally{languageBusy.value=false}}
+async function changeSteamvrLifecycle(event:Event){const enabled=(event.target as HTMLInputElement).checked;settingsError.value='';lifecycleBusy.value=true;try{if(isTauri())await invoke('set_steamvr_lifecycle',{enabled});snap.value={...snap.value,steamvrLifecycle:enabled}}catch{settingsError.value=t('saveError');(event.target as HTMLInputElement).checked=snap.value.steamvrLifecycle}finally{lifecycleBusy.value=false}}
 async function openModule(){linkError.value='';if(!isTauri()){window.open('https://github.com/Lateir/qptp-module','_blank','noopener,noreferrer');return}try{await invoke('open_module_page')}catch(e){linkError.value=String(e)}}
 function status(side:'left'|'right'){const root=snap.value.status||{};const controllers=root.controllers as Record<string,unknown>|undefined;const value=root[side]||controllers?.[side];return (value&&typeof value==='object'?value:{}) as Record<string,unknown>}
 function online(side:'left'|'right'){return connected.value&&status(side).connected===true}
@@ -63,6 +64,7 @@ onUnmounted(()=>unlisten?.())
           <button :class="{active:mode==='lan'}" :disabled="busy" @click="select('lan')"><b>LAN</b><small>{{t('autoDiscovery')}}</small></button>
         </div>
         <div class="language-control"><label for="app-language">{{t('language')}}</label><select id="app-language" :value="language" :disabled="languageBusy" @change="changeLanguage"><option v-for="item in languages" :key="item.code" :value="item.code">{{item.name}}</option></select></div>
+        <label class="steamvr-lifecycle"><input type="checkbox" :checked="snap.steamvrLifecycle" :disabled="lifecycleBusy" @change="changeSteamvrLifecycle"/><span>{{t('steamvrLifecycle')}}</span></label>
         <button type="button" class="module-link" @click="openModule">
           <b>{{t('moduleRequired')}}</b>
           <span>github.com/Lateir/qptp-module ↗</span>

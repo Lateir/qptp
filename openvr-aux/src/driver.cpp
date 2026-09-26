@@ -4,6 +4,7 @@
 #include <cstring>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <windows.h>
 
@@ -16,7 +17,21 @@ static void LogError(const char* action, const char* path, int code) {
     std::snprintf(line, sizeof(line), "[qptp] %s %s error=%d", action, path, code);
     Log(line);
 }
+static bool AutoLaunchEnabled() {
+    wchar_t roaming[MAX_PATH]{};
+    const DWORD length = GetEnvironmentVariableW(L"APPDATA", roaming, MAX_PATH);
+    if (!length || length >= MAX_PATH) return true;
+    const auto file = std::filesystem::path(roaming) / L"dev.lateir.qptp" / L"steamvr_lifecycle";
+    std::ifstream input(file, std::ios::binary);
+    char value = '1';
+    if (input.get(value) && value == '0') return false;
+    return true;
+}
 static void LaunchInstalledApp() {
+    if (!AutoLaunchEnabled()) {
+        Log("[qptp] SteamVR lifecycle disabled; skipping application autostart");
+        return;
+    }
     HMODULE module = nullptr;
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
         reinterpret_cast<LPCWSTR>(&HmdDriverFactory), &module)) {
