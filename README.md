@@ -11,18 +11,21 @@ Windows приложение для просмотра дополнительн�
 
 ## Запуск для разработки
 
+Запустите `dev.bat` двойным щелчком или из терминала. Он при необходимости установит зависимости через `npm ci`.
+
 ```powershell
-npm install
-npm run tauri dev
+.\dev.bat
 ```
 
 ## Сборка Windows
 
+Запустите `build-installer.bat`. Он соберёт установщик NSIS для Windows.
+
 ```powershell
-npm run tauri build
+.\build-installer.bat
 ```
 
-Готовый установщик находится в `src-tauri/target/release/bundle`. Для быстрой проверки без установщика: `npm run tauri build -- --no-bundle`.
+Готовый установщик находится в `src-tauri/target/release/bundle/nsis`. Для быстрой проверки без установщика: `npm.cmd run tauri -- build --no-bundle`. В PowerShell используйте `npm.cmd`: вызов `npm` может блокироваться политикой выполнения `npm.ps1`.
 
 ## Поведение
 
