@@ -1,0 +1,67 @@
+@import "@fontsource-variable/unbounded";
+@import "@fontsource-variable/manrope";
+@import "@fontsource-variable/jetbrains-mono";
+
+:root{
+  --bg:#f6f6f4;--surface:#ffffff;--ink:#111113;--muted:#8b8b90;--line:#e2e2de;--chip:#8f8f94;--chip-ink:#ffffff;
+  --on:#22b357;--off:#c4c4c8;
+  --display:'Unbounded Variable',sans-serif;--ui:'Manrope Variable','Segoe UI',sans-serif;--mono:'JetBrains Mono Variable',Consolas,monospace;
+  color-scheme:light dark;font-family:var(--ui);color:var(--ink);background:var(--bg);font-synthesis:none;-webkit-font-smoothing:antialiased;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#111113;--surface:#1a1a1d;--ink:#ededee;--muted:#76767e;--line:#2a2a2f;--chip:#3a3a40;--chip-ink:#ffffff;--on:#2fcf6a;--off:#44444b}
+}
+*{box-sizing:border-box}
+html,body,#app{height:100%}
+body{margin:0;overflow:hidden;background:var(--bg);user-select:none;cursor:default}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;padding:0}
+button:disabled{cursor:default}
+
+.app{display:grid;grid-template-columns:150px 1fr 150px;gap:14px;height:100%;padding:14px}
+
+/* Touch pads */
+.pad{position:relative;isolation:isolate;border:1px solid var(--line);border-radius:14px;background:var(--surface);overflow:hidden}
+.readout{position:absolute;inset:0;margin:0;padding:22px 18px;display:flex;flex-direction:column;justify-content:space-around}
+.readout div{display:flex;align-items:baseline;justify-content:space-between}
+.readout dt{font-family:var(--display);font-size:22px;font-weight:300;color:var(--muted)}
+.readout dd{margin:0;font-family:var(--mono);font-size:22px;font-weight:500;font-variant-numeric:tabular-nums;transition:color .2s}
+.pad:not(.live) dd{color:var(--muted)}
+.field{position:absolute;inset:16px}
+/* White + difference: reads as an ink dot on the pad and inverts the digits underneath, in both themes. */
+.dot{position:absolute;border-radius:50%;background:#fff;mix-blend-mode:difference;transform:translate(-50%,-50%);transition:width 60ms linear,height 60ms linear}
+
+/* Center column */
+.center{display:flex;flex-direction:column;align-items:center;min-width:0}
+h1{margin:4px 0 0;font-family:var(--display);font-size:25px;font-weight:450;letter-spacing:-.02em;white-space:nowrap}
+h1 em{font-style:normal;font-weight:250;color:var(--muted)}
+.view{flex:1;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;min-height:0}
+
+.link{margin:0;display:flex;gap:18px;font-size:13px}
+.link span{font-weight:700;letter-spacing:.04em}
+.link b{font-weight:500;color:var(--muted)}
+.link b.connected{color:var(--on)}
+.link b.error{color:#e5484d}
+
+.cards{display:flex;gap:18px}
+.card{width:146px;padding:12px 10px 11px;border:1px solid var(--line);border-radius:16px;background:var(--surface);text-align:center}
+.card h2{margin:0;font-size:14px;font-weight:600}
+.card p{margin:10px 0 8px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px}
+.card i{width:14px;height:14px;border-radius:50%;background:var(--off);transition:background .2s}
+.card i.on{background:var(--on)}
+.card small{font-family:var(--mono);font-size:12px;color:var(--muted)}
+
+.modes{display:flex;gap:12px}
+.modes button{width:146px;padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--surface);display:flex;flex-direction:column;gap:3px;transition:border-color .15s}
+.modes button b{font-size:14px}
+.modes button small{font-size:11px;color:var(--muted)}
+.modes button.active{border-color:var(--ink)}
+.message{margin:0;max-width:320px;font-size:12px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta{margin:0;font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+.about{max-width:330px;text-align:center;font-size:12px;line-height:1.45;user-select:text}
+.about p{margin:0 0 8px}
+
+.tabs{display:flex;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+.tabs button{padding:6px 18px;border-radius:999px;font-size:13px;font-weight:500;color:var(--muted);transition:background .15s,color .15s}
+.tabs button:hover{color:var(--ink)}
+.tabs button.active{background:var(--chip);color:var(--chip-ink)}
