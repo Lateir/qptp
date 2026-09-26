@@ -1,0 +1,18 @@
+{
+  "jsonid": "input_profile",
+  "controller_type": "qptp",
+  "device_class": "TrackedDeviceClass_Controller",
+  "resource_root": "qptp",
+  "driver_name": "qptp",
+  "input_bindingui_mode": "single_device",
+  "input_bindingui_left": { "image": "{qptp}/icons/qptp.svg" },
+  "input_source": {
+    "/pose/raw": { "type": "pose", "order": 0 },
+    "/input/left_pad": { "type": "trackpad", "touch": true, "force": true, "binding_image_point": [50, 55], "order": 1 },
+    "/input/right_pad": { "type": "trackpad", "touch": true, "force": true, "binding_image_point": [170, 55], "order": 2 },
+    "/input/left_extra_1": { "type": "button", "click": true, "binding_image_point": [32, 125], "order": 3 },
+    "/input/left_extra_2": { "type": "button", "click": true, "binding_image_point": [75, 125], "order": 4 },
+    "/input/right_extra_1": { "type": "button", "click": true, "binding_image_point": [145, 125], "order": 5 },
+    "/input/right_extra_2": { "type": "button", "click": true, "binding_image_point": [188, 125], "order": 6 }
+  }
+}

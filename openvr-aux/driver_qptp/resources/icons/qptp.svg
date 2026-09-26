@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="160" viewBox="0 0 220 160">
+<rect x="2" y="2" width="216" height="156" rx="18" fill="#16252b" stroke="#55d6d0" stroke-width="3"/>
+<text x="110" y="25" text-anchor="middle" fill="white" font-family="Arial" font-size="13">QPTP Auxiliary Input</text>
+<rect x="20" y="38" width="60" height="60" rx="8" fill="#34666e" stroke="#8ce9dd"/><rect x="140" y="38" width="60" height="60" rx="8" fill="#34666e" stroke="#8ce9dd"/>
+<text x="50" y="75" text-anchor="middle" fill="white" font-family="Arial">LEFT</text><text x="170" y="75" text-anchor="middle" fill="white" font-family="Arial">RIGHT</text>
+<circle cx="32" cy="125" r="10" fill="#55d6d0"/><circle cx="75" cy="125" r="10" fill="#55d6d0"/><circle cx="145" cy="125" r="10" fill="#55d6d0"/><circle cx="188" cy="125" r="10" fill="#55d6d0"/>
+</svg>

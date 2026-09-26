@@ -17,7 +17,11 @@ body{margin:0;overflow:hidden;background:var(--bg);user-select:none;cursor:defau
 button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;padding:0}
 button:disabled{cursor:default}
 
-.app{display:grid;grid-template-columns:150px 1fr 150px;gap:14px;height:100%;padding:14px}
+.app{display:grid;grid-template-columns:150px 1fr 150px;gap:14px;height:100%;padding:14px;direction:ltr}
+/* Keep the physical left/right controller positions fixed in Arabic. */
+html[dir="rtl"] .app>.pad,html[dir="rtl"] .app>.center{direction:rtl}
+html[dir="rtl"] .cards{direction:ltr}
+html[dir="rtl"] .card{direction:rtl}
 
 /* Touch pads */
 .pad{position:relative;isolation:isolate;border:1px solid var(--line);border-radius:14px;background:var(--surface);overflow:hidden}
@@ -52,6 +56,7 @@ h1 em{font-style:normal;font-weight:250;color:var(--muted)}
 .link b{font-weight:500;color:var(--muted)}
 .link b.connected{color:var(--on)}
 .link b.error{color:#e5484d}
+.steamvr-link{font-size:11px;gap:10px}
 
 .cards{display:flex;gap:18px}
 .card{width:146px;padding:12px 10px 11px;border:1px solid var(--line);border-radius:16px;background:var(--surface);text-align:center}
@@ -74,8 +79,8 @@ h1 em{font-style:normal;font-weight:250;color:var(--muted)}
 .input-modes button{flex:1;min-width:0;height:58px;padding:8px 4px;border:1px solid var(--line);border-radius:13px;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:border-color .15s,background .15s}
 .input-modes button:hover{border-color:var(--ink)}
 .input-modes button.active{border-color:var(--ink)}
-.input-modes button b{font-size:12px;font-weight:700;white-space:nowrap}
-.input-modes button small{font-size:10px;color:var(--muted);white-space:nowrap}
+.input-modes button b{font-size:12px;font-weight:700;line-height:1.2;overflow-wrap:anywhere}
+.input-modes button small{font-size:10px;color:var(--muted);line-height:1.2;overflow-wrap:anywhere}
 .mode-note{margin:4px 0;color:var(--muted);font-size:12px;text-align:center}
 .threshold-control{width:min(100%,320px);display:flex;flex-direction:column;gap:5px}
 .threshold-control label{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:600}
@@ -88,6 +93,10 @@ h1 em{font-style:normal;font-weight:250;color:var(--muted)}
 .settings-view{width:100%;display:flex;flex-direction:column;align-items:center;gap:7px}
 .settings-view .modes{margin-bottom:2px}
 .settings-view .message{max-width:330px}
+.language-control{width:304px;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;font-weight:600}
+.language-control label{flex:none}
+.language-control select{width:190px;min-width:0;height:32px;padding:4px 8px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--ink);font:inherit;cursor:pointer}
+.language-control select:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .module-link{width:304px;min-height:55px;margin-top:3px;padding:9px 12px;border:1px solid var(--line);border-radius:14px;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center;transition:border-color .15s,transform .15s}
 .module-link:hover{border-color:var(--ink);transform:translateY(-1px)}
 .module-link:focus-visible{outline:2px solid var(--ink);outline-offset:2px}

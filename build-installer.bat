@@ -15,6 +15,10 @@ if not exist "node_modules\" (
   if errorlevel 1 goto failed
 )
 
+echo Building the SteamVR driver...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\openvr-aux\build-driver.ps1"
+if errorlevel 1 goto failed
+
 echo Building the Windows installer...
 call npm.cmd run tauri -- build --bundles nsis
 if errorlevel 1 goto failed

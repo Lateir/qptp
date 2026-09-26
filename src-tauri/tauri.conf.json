@@ -18,7 +18,8 @@
         "resizable": false,
         "maximizable": false,
         "fullscreen": false,
-        "center": true
+        "center": true,
+        "visible": false
       }
     ],
     "security": {
@@ -38,8 +39,14 @@
     "android": {
       "debugApplicationIdSuffix": ".debug"
     },
-    "resources": [
-      "resources/platform-tools/*"
-    ]
+    "resources": {
+      "resources/platform-tools/": "resources/platform-tools/",
+      "../openvr-aux/driver_qptp/": "driver_qptp/"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
+    }
   }
 }

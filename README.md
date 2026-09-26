@@ -1,44 +1,50 @@
 # Quest Pro Touch Plus (qptp)
 
-Windows приложение для просмотра дополнительных сенсоров контроллеров Quest Pro Touch Pro. MVP показывает состояние подключения, статус каждого контроллера и живые значения touch-панелей (X, Y, force). Бинды жестов и интеграция со SteamVR запланированы на следующий этап.
+A Windows app for viewing the additional touch sensors on Quest Pro Touch Pro controllers. It shows the connection state, each controller's status, and live touchpad values (X, Y, and force). The [qptp SteamVR auxiliary driver](openvr-aux/README.md) receives the same live input from this app and exposes it as one additional device alongside the stock Quest Pro controllers.
 
-## Требования
+## Requirements
 
-- Windows 10/11 с WebView2.
-- Quest Pro с установленным и запущенным [qptp-module](https://github.com/Lateir/qptp-module). Модуль предоставляет поток QPR2/QPS1.
-- USB: разрешённая отладка ADB на Quest. ADB и его DLL включены в сборку приложения.
-- LAN: компьютер и Quest в одной локальной сети; доступ к UDP 27183 и TCP 27182. Quest находится автоматически через UDP broadcast.
+- Windows 10/11 with WebView2.
+- A Quest Pro with [qptp-module](https://github.com/Lateir/qptp-module) installed and running. The module provides the QPR2/QPS1 stream.
+- USB: ADB debugging authorized on the Quest. ADB and its DLLs are bundled with the app.
+- LAN: the computer and Quest on the same local network, with access to UDP port 27183 and TCP port 27182. The app discovers the Quest automatically by UDP broadcast.
 
-## Запуск для разработки
+## Run for development
 
-Запустите `dev.bat` двойным щелчком или из терминала. Он при необходимости установит зависимости через `npm ci`.
+Run `dev.bat` by double-clicking it or from a terminal. It installs dependencies with `npm ci` if needed.
 
 ```powershell
 .\dev.bat
 ```
 
-## Сборка Windows
+## Build for Windows
 
-Запустите `build-installer.bat`. Он соберёт установщик NSIS для Windows.
+Run `build-installer.bat` to build the Windows NSIS installer. It compiles and bundles the qptp OpenVR driver. During installation, the installer registers the driver with SteamVR; during uninstallation, it removes that registration. SteamVR must be installed for registration, and needs a restart to load or unload the driver reliably.
 
 ```powershell
 .\build-installer.bat
 ```
 
-Готовый установщик находится в `src-tauri/target/release/bundle/nsis`. Для быстрой проверки без установщика: `npm.cmd run tauri -- build --no-bundle`. В PowerShell используйте `npm.cmd`: вызов `npm` может блокироваться политикой выполнения `npm.ps1`.
+The installer is written to `src-tauri/target/release/bundle/nsis`. For a quick build without an installer, run `npm.cmd run tauri -- build --no-bundle`. In PowerShell, use `npm.cmd`: execution policy may block `npm.ps1` when calling `npm`.
 
-## Поведение
+## Behavior
 
-Приложение подключается автоматически сразу после запуска и повторяет поиск при недоступном Quest или разрыве потока. На вкладке «Настройки» выбирается USB или LAN (выбор сохраняется). Для USB используется встроенный ADB и создаётся forward `tcp:27182`; для LAN отправляется UDP discovery `QPD1` на порт 27183 и выполняется подключение к найденному адресу. При получении `QPS1` отображаются connected, battery и tracking для каждого контроллера; `QPR2` обновляет X/Y/force. Ось Y: 0 — верхнее положение.
+The app connects automatically on startup and retries if the Quest is unavailable or the stream disconnects. Choose USB or LAN on the **Settings** tab; the choice is saved. USB uses the bundled ADB and creates a `tcp:27182` port forward. LAN broadcasts the `QPD1` discovery packet to UDP port 27183, then connects to the discovered address. `QPS1` supplies controller connection, battery, and tracking data; `QPR2` updates X, Y, and force. Y = 0 is the top of the touchpad.
 
-При сворачивании окно уничтожается (освобождается память WebView2), а приложение продолжает работать в трее. ЛКМ по значку открывает окно, ПКМ показывает статус контроллеров L и R (зелёный — на связи, серый — нет) и пункт «Выход». Закрытие окна крестиком завершает приложение.
+Minimizing destroys the window to release WebView2 memory while the app continues running in the system tray. Left-click the tray icon to reopen the window. Right-click to see the L and R controller indicators (green = connected, gray = disconnected) and **Quit**. Closing the window with its X button exits the app.
 
-На вкладке «Режим» выбирается общий для обоих контроллеров режим: «Тачпад», «Кнопка» или «2 кнопки». В последнем режиме верхняя и нижняя половины каждой панели становятся отдельными виртуальными кнопками; выбранная половина удерживается до отпускания. Нажатие фиксируется при усилии 0.30 по умолчанию, отпускание — при 0.20. Порог нажатия настраивается слайдером в диапазоне 0.21–1.00. При нажатии модулю отправляется импульс вибрации длительностью 2 мс в зону большого пальца соответствующего контроллера. Пока модуль не подтвердит завершение импульса, новые импульсы для этого контроллера пропускаются. Мощность импульса настраивается отдельным ползунком от 0 до 100% (по умолчанию 20%; 0% отключает вибрацию). Режим, порог, мощность вибрации и транспорт сохраняются в пользовательском `config.json` каталога настроек приложения; прежний файл `transport` читается при первом запуске после обновления. Вывод этих кнопок в SteamVR остаётся следующим этапом.
+On the **Mode** tab, choose one mode for both controllers: **Touchpad**, **Button**, or **2 buttons**. In two-button mode, the upper and lower halves of each touchpad act as separate virtual buttons; the selected half stays active until release. The default press threshold is 0.30 and the release threshold is 0.20. The press threshold slider ranges from 0.21 to 1.00.
 
-На вкладке «Настройки» также есть кнопка, которая открывает репозиторий модуля в системном браузере. Версия приложения берётся из `package.json` как для интерфейса, так и для установщика Tauri.
+The **Status** tab shows SteamVR as connected only after the qptp driver acknowledges the app's input packets. SteamVR loads the installed driver at startup; the driver starts the installed app if it is not already running. If the app was last minimized to the tray, it starts there again. Opening it from the tray records the visible state for the next launch.
 
-## Протокол и исходные материалы
+Each press sends a 2 ms haptic pulse to the corresponding controller's thumb zone. Further pulses for that controller are dropped until the module acknowledges completion. A separate slider sets vibration strength from 0% to 100% (20% by default; 0% disables vibration). The mode, press threshold, vibration strength, and transport are saved in the app's user `config.json`. On the first launch after an upgrade, the app can read the previous `transport` file as a migration fallback. On Windows, the app sends the current mode and sensor state to the local qptp SteamVR driver. SteamVR action bindings still need to be assigned per application.
 
-Реализация приёмника перенесена из `qpro_debug/qpro_stream_receiver.py`. В проекте нет зависимости от запущенного Python. Протокол и модуль Quest описаны в [qptp-module](https://github.com/Lateir/qptp-module). ADB распространяется с `NOTICE.txt` из Android Platform Tools.
+The **Settings** tab also has a button that opens the module repository in the system browser. The app and Tauri installer versions both come from `package.json`.
 
-При LAN используйте доверенную локальную сеть: текущий модуль не проверяет подлинность TCP клиентов.
+You can select the interface language in **Settings**. The list contains English, Simplified Chinese, Hindi, Spanish, Arabic, French, Bengali, Brazilian Portuguese, Russian, Indonesian, German, and Japanese, ordered by total speakers. On first launch, the app selects the first supported language in the user's preferred Windows UI languages; if none is supported, it selects English. The choice is saved in `config.json` and is not replaced by the system language on later launches. Arabic text is displayed right to left while the physical left and right controllers retain their positions. The tray menu follows the selected language.
+
+## Protocol and source material
+
+The receiver was ported from `qpro_debug/qpro_stream_receiver.py`. Running Python is not required. The protocol and Quest module are documented in [qptp-module](https://github.com/Lateir/qptp-module). ADB is distributed with the Android Platform Tools `NOTICE.txt`.
+
+When using LAN, connect over a trusted local network: the current module does not authenticate TCP clients.

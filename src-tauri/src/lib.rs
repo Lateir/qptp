@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{io::{self, Read, Write}, net::{TcpStream, UdpSocket}, path::{Path, PathBuf}, process::Command, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc, Mutex}, thread, time::{Duration, Instant}};
 use tauri::{image::Image, menu::{IconMenuItem, Menu, MenuItem, PredefinedMenuItem}, tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}, AppHandle, Emitter, Manager, RunEvent, State, WindowEvent, Wry};
+mod extra_ipc;
+#[cfg(windows)]
+pub mod steamvr_install;
 
 const PORT: u16 = 27182;
 const DISCOVERY_PORT: u16 = 27183;
@@ -10,11 +13,41 @@ const HAPTIC_DURATION_MS: u16 = 2;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
-struct UserConfig { transport: String, input_mode: String, press_threshold: f32, haptic_amplitude: f32 }
+struct UserConfig { transport: String, input_mode: String, press_threshold: f32, haptic_amplitude: f32, language: String }
 impl Default for UserConfig {
-    fn default()->Self { Self { transport:"usb".into(), input_mode:"touchpad".into(), press_threshold:0.30, haptic_amplitude:0.20 } }
+    fn default()->Self { Self { transport:"usb".into(), input_mode:"touchpad".into(), press_threshold:0.30, haptic_amplitude:0.20, language:system_language().into() } }
 }
 fn valid_mode(mode:&str)->bool {matches!(mode,"touchpad"|"button"|"two_buttons")}
+fn valid_language(language:&str)->bool {matches!(language,"ru"|"en"|"zh-CN"|"hi"|"es"|"ar"|"fr"|"bn"|"pt-BR"|"id"|"ja"|"de")}
+fn match_language(locale:&str)->Option<&'static str>{
+    let locale=locale.trim().replace('_',"-").to_ascii_lowercase();
+    let primary=locale.split('-').next()?;
+    match primary {
+        "en"=>Some("en"),"hi"=>Some("hi"),"es"=>Some("es"),"ar"=>Some("ar"),
+        "fr"=>Some("fr"),"bn"=>Some("bn"),"ru"=>Some("ru"),"id"|"in"=>Some("id"),
+        "de"=>Some("de"),"ja"=>Some("ja"),"pt"=>Some("pt-BR"),
+        "zh" if locale=="zh"||locale.starts_with("zh-cn")||locale.starts_with("zh-sg")||locale.starts_with("zh-hans")=>Some("zh-CN"),
+        _=>None,
+    }
+}
+fn choose_language<'a>(locales:impl IntoIterator<Item=&'a str>)->&'static str{
+    locales.into_iter().find_map(match_language).unwrap_or("en")
+}
+#[cfg(windows)]
+fn system_language()->&'static str{
+    use windows_sys::Win32::Globalization::{GetUserPreferredUILanguages,MUI_LANGUAGE_NAME};
+    let mut count=0u32;let mut size=0u32;
+    if unsafe{GetUserPreferredUILanguages(MUI_LANGUAGE_NAME,&mut count,std::ptr::null_mut(),&mut size)}==0||size==0{return "en"}
+    let mut buffer=vec![0u16;size as usize];
+    if unsafe{GetUserPreferredUILanguages(MUI_LANGUAGE_NAME,&mut count,buffer.as_mut_ptr(),&mut size)}==0{return "en"}
+    let locales:Vec<_>=buffer.split(|&unit|unit==0).take_while(|part|!part.is_empty()).filter_map(|part|String::from_utf16(part).ok()).collect();
+    choose_language(locales.iter().map(String::as_str))
+}
+#[cfg(not(windows))]
+fn system_language()->&'static str{
+    let locale=std::env::var("LC_ALL").or_else(|_|std::env::var("LC_MESSAGES")).or_else(|_|std::env::var("LANG")).unwrap_or_default();
+    choose_language([locale.as_str()])
+}
 fn valid_threshold(value:f32)->bool {value.is_finite()&&value>RELEASE_THRESHOLD&&value<=1.0}
 
 #[derive(Clone, Default, Serialize)]
@@ -24,14 +57,15 @@ struct Sensor { x: u16, y: u16, force: f32 }
 struct Snapshot {
     phase: String, message: String, transport: String, endpoint: Option<String>,
     protocol: Option<String>, samples: u64, left: Sensor, right: Sensor, status: Option<Value>,
-    input_mode: String, press_threshold: f32, haptic_amplitude: f32, left_buttons: [bool;2], right_buttons: [bool;2],
+    input_mode: String, press_threshold: f32, haptic_amplitude: f32, language: String, left_buttons: [bool;2], right_buttons: [bool;2],
+    steamvr_connected: bool,
 }
 impl Default for Snapshot {
-    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"usb".into(), endpoint:None, protocol:None, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,haptic_amplitude:0.20,left_buttons:[false;2],right_buttons:[false;2] } }
+    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"usb".into(), endpoint:None, protocol:None, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,haptic_amplitude:0.20,language:"ru".into(),left_buttons:[false;2],right_buttons:[false;2],steamvr_connected:false } }
 }
 struct StreamState { snapshot: Mutex<Snapshot>, config_lock: Mutex<()>, generation: AtomicU64, adb_used: AtomicBool }
 type Shared = Arc<StreamState>;
-struct Tray { left: IconMenuItem<Wry>, right: IconMenuItem<Wry>, last: Mutex<Option<(bool,bool)>> }
+struct Tray { left: IconMenuItem<Wry>, right: IconMenuItem<Wry>, show: MenuItem<Wry>, quit: MenuItem<Wry>, last: Mutex<Option<(bool,bool)>> }
 
 fn controller_connected(s:&Snapshot, side:&str)->bool {
     if s.phase!="connected" {return false}
@@ -54,7 +88,7 @@ fn update_tray(app:&AppHandle, lr:(bool,bool)){
 }
 fn publish(app:&AppHandle, state:&Shared, change:impl FnOnce(&mut Snapshot)) {
     // Tray is updated after the lock is released: menu calls block on the main thread.
-    let lr=match state.snapshot.lock() {Ok(mut snapshot)=>{change(&mut snapshot);let _=app.emit("stream-state",snapshot.clone());(controller_connected(&snapshot,"left"),controller_connected(&snapshot,"right"))},Err(_)=>return};
+    let lr=match state.snapshot.lock() {Ok(mut snapshot)=>{change(&mut snapshot);snapshot.steamvr_connected=extra_ipc::publish(&snapshot);let _=app.emit("stream-state",snapshot.clone());(controller_connected(&snapshot,"left"),controller_connected(&snapshot,"right"))},Err(_)=>return};
     update_tray(app,lr);
 }
 fn adb_path(app:&AppHandle)->Result<PathBuf,String>{
@@ -164,6 +198,7 @@ fn read_frame(stream:&mut TcpStream, app:&AppHandle, state:&Shared, generation:u
                     s.left=left;s.right=right;s.samples+=1;s.phase="connected".into();s.message="Поток сенсоров активен".into();s.protocol=Some("QPR2 / QPS1".into());
                     s.left_buttons=if s.status.is_none()||controller_connected(&s,"left"){button_step(previous.0,&s.left,&s.input_mode,s.press_threshold)}else{[false;2]};
                     s.right_buttons=if s.status.is_none()||controller_connected(&s,"right"){button_step(previous.1,&s.right,&s.input_mode,s.press_threshold)}else{[false;2]};
+                    s.steamvr_connected=extra_ipc::publish(&s);
                     pulses=[new_press(previous.0,s.left_buttons),new_press(previous.1,s.right_buttons)];
                     amplitude=(s.haptic_amplitude*255.0).round() as u8;
                     if previous!=(s.left_buttons,s.right_buttons)||last_emit.elapsed()>=Duration::from_millis(33){let _=app.emit("stream-state",s.clone());last_emit=Instant::now()}
@@ -227,16 +262,17 @@ fn load_user_config(app:&AppHandle)->UserConfig{
     if !valid_mode(&config.input_mode){config.input_mode="touchpad".into()}
     if !valid_threshold(config.press_threshold){config.press_threshold=0.30}
     if !config.haptic_amplitude.is_finite()||!(0.0..=1.0).contains(&config.haptic_amplitude){config.haptic_amplitude=0.20}
+    if !valid_language(&config.language){config.language="en".into()}
     config
 }
 fn save_user_config(app:&AppHandle,config:&UserConfig)->Result<(),String>{
     let file=config_file(app)?;
     write_user_config_file(&file,config)
 }
-fn config_from_snapshot(s:&Snapshot)->UserConfig{UserConfig{transport:s.transport.clone(),input_mode:s.input_mode.clone(),press_threshold:s.press_threshold,haptic_amplitude:s.haptic_amplitude}}
+fn config_from_snapshot(s:&Snapshot)->UserConfig{UserConfig{transport:s.transport.clone(),input_mode:s.input_mode.clone(),press_threshold:s.press_threshold,haptic_amplitude:s.haptic_amplitude,language:s.language.clone()}}
 fn start_worker(app:&AppHandle,state:&Shared,transport:String){
     let generation=state.generation.fetch_add(1,Ordering::SeqCst)+1;
-    publish(app,state,|s|{let input_mode=s.input_mode.clone();let press_threshold=s.press_threshold;let haptic_amplitude=s.haptic_amplitude;*s=Snapshot{transport:transport.clone(),input_mode,press_threshold,haptic_amplitude,..Snapshot::default()}});
+    publish(app,state,|s|{let input_mode=s.input_mode.clone();let press_threshold=s.press_threshold;let haptic_amplitude=s.haptic_amplitude;let language=s.language.clone();*s=Snapshot{transport:transport.clone(),input_mode,press_threshold,haptic_amplitude,language,..Snapshot::default()}});
     let (app,shared)=(app.clone(),state.clone());thread::spawn(move||worker(app,shared,generation,transport));
 }
 #[tauri::command]
@@ -280,6 +316,16 @@ fn set_haptic_amplitude(app:AppHandle,state:State<Shared>,amplitude:f32)->Result
     publish(&app,state.inner(),|s|s.haptic_amplitude=amplitude);Ok(())
 }
 #[tauri::command]
+fn set_language(app:AppHandle,state:State<Shared>,language:String)->Result<(),String>{
+    if !valid_language(&language){return Err("Неизвестный язык".into())}
+    let _guard=state.config_lock.lock().map_err(|e|e.to_string())?;
+    let mut config=state.snapshot.lock().map(|s|config_from_snapshot(&s)).map_err(|e|e.to_string())?;
+    if config.language==language{return Ok(())}
+    config.language=language.clone();save_user_config(&app,&config)?;
+    if let Some(tray)=app.try_state::<Tray>(){let (show,quit)=tray_labels(&language);let _=tray.show.set_text(show);let _=tray.quit.set_text(quit);}
+    publish(&app,state.inner(),|s|s.language=language);Ok(())
+}
+#[tauri::command]
 fn open_module_page()->Result<(),String>{
     const URL:&str="https://github.com/Lateir/qptp-module";
     let wide:Vec<u16>=URL.encode_utf16().chain(std::iter::once(0)).collect();
@@ -289,21 +335,41 @@ fn open_module_page()->Result<(),String>{
     if (result as isize)<=32 {Err(format!("Не удалось открыть браузер (код {})",result as isize))}else{Ok(())}
 }
 fn show_window(app:&AppHandle){
+    save_tray_state(app,false);
     if let Some(w)=app.get_webview_window("main"){let _=w.unminimize();let _=w.show();let _=w.set_focus();return}
     // Building a webview inside an event handler can deadlock on Windows, so do it off the main thread.
     let app=app.clone();
     thread::spawn(move||{if let Some(cfg)=app.config().app.windows.first(){if let Ok(w)=tauri::WebviewWindowBuilder::from_config(&app,cfg).and_then(|b|b.build()){let _=w.set_focus();}}});
 }
-fn setup_tray(app:&AppHandle)->tauri::Result<()>{
+fn tray_state_file(app:&AppHandle)->Option<PathBuf>{app.path().app_config_dir().ok().map(|d|d.join("window_in_tray"))}
+fn starts_in_tray(app:&AppHandle)->bool{tray_state_file(app).and_then(|p|std::fs::read_to_string(p).ok()).is_some_and(|s|s.trim()=="1")}
+fn save_tray_state(app:&AppHandle,in_tray:bool){
+    if let Some(path)=tray_state_file(app){
+        if let Some(parent)=path.parent(){let _=std::fs::create_dir_all(parent);}
+        let _=std::fs::write(path,if in_tray{"1"}else{"0"});
+    }
+}
+fn tray_labels(language:&str)->(&'static str,&'static str){
+    match language {
+        "en"=>("Open","Quit"),"zh-CN"=>("打开","退出"),"hi"=>("खोलें","बाहर निकलें"),
+        "es"=>("Abrir","Salir"),"ar"=>("فتح","خروج"),"fr"=>("Ouvrir","Quitter"),
+        "bn"=>("খুলুন","বন্ধ করুন"),"pt-BR"=>("Abrir","Sair"),"id"=>("Buka","Keluar"),
+        "ja"=>("開く","終了"),"de"=>("Öffnen","Beenden"),_=>("Открыть","Выход"),
+    }
+}
+fn setup_tray(app:&AppHandle,language:&str)->tauri::Result<()>{
     let left=IconMenuItem::with_id(app,"left","L",true,Some(dot(false)),None::<&str>)?;
     let right=IconMenuItem::with_id(app,"right","R",true,Some(dot(false)),None::<&str>)?;
-    let menu=Menu::with_items(app,&[&left,&right,&PredefinedMenuItem::separator(app)?,&MenuItem::with_id(app,"show","Открыть",true,None::<&str>)?,&MenuItem::with_id(app,"quit","Выход",true,None::<&str>)?])?;
+    let (show_label,quit_label)=tray_labels(language);
+    let show=MenuItem::with_id(app,"show",show_label,true,None::<&str>)?;
+    let quit=MenuItem::with_id(app,"quit",quit_label,true,None::<&str>)?;
+    let menu=Menu::with_items(app,&[&left,&right,&PredefinedMenuItem::separator(app)?,&show,&quit])?;
     let mut tray=TrayIconBuilder::with_id("main").tooltip("Quest Pro Touch Plus").menu(&menu).show_menu_on_left_click(false)
         .on_menu_event(|app,e|match e.id().as_ref(){"show"=>show_window(app),"quit"=>app.exit(0),_=>{}})
         .on_tray_icon_event(|tray,e|if let TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}=e{show_window(tray.app_handle())});
     if let Some(icon)=app.default_window_icon(){tray=tray.icon(icon.clone())}
     tray.build(app)?;
-    app.manage(Tray{left,right,last:Mutex::new(None)});
+    app.manage(Tray{left,right,show,quit,last:Mutex::new(None)});
     Ok(())
 }
 pub fn run(){
@@ -311,21 +377,26 @@ pub fn run(){
     tauri::Builder::default().manage(state)
         .setup(|app|{
             let handle=app.handle().clone();
-            setup_tray(&handle)?;
             let config=load_user_config(&handle);
+            setup_tray(&handle,&config.language)?;
             let _=save_user_config(&handle,&config);
             let transport=config.transport.clone();
-            if let Ok(mut snapshot)=handle.state::<Shared>().snapshot.lock(){snapshot.input_mode=config.input_mode;snapshot.press_threshold=config.press_threshold;snapshot.haptic_amplitude=config.haptic_amplitude;}
+            if let Ok(mut snapshot)=handle.state::<Shared>().snapshot.lock(){snapshot.input_mode=config.input_mode;snapshot.press_threshold=config.press_threshold;snapshot.haptic_amplitude=config.haptic_amplitude;snapshot.language=config.language;}
             start_worker(&handle,handle.state::<Shared>().inner(),transport);
+            #[cfg(all(windows, not(debug_assertions)))]
+            thread::spawn(||{let _=steamvr_install::ensure_registered();});
+            if starts_in_tray(&handle){
+                if let Some(window)=handle.get_webview_window("main"){let _=window.hide();}
+            }else{show_window(&handle);}
             Ok(())
         })
         .on_window_event(|window,event|match event{
             // Minimize = hide to tray: destroy the window so WebView2 releases its memory.
-            WindowEvent::Resized(_) if window.is_minimized().unwrap_or(false)=>{let _=window.destroy();}
+            WindowEvent::Resized(_) if window.is_minimized().unwrap_or(false)=>{save_tray_state(window.app_handle(),true);let _=window.destroy();}
             WindowEvent::CloseRequested{..}=>window.app_handle().exit(0),
             _=>{}
         })
-        .invoke_handler(tauri::generate_handler![get_stream_state,set_transport,set_input_mode,set_press_threshold,set_haptic_amplitude,open_module_page])
+        .invoke_handler(tauri::generate_handler![get_stream_state,set_transport,set_input_mode,set_press_threshold,set_haptic_amplitude,set_language,open_module_page])
         .build(tauri::generate_context!()).expect("tauri application error")
         .run(|app,event|match event{
             // Destroying the last window (tray mode) must not quit the app; explicit exit passes a code.
@@ -366,6 +437,15 @@ mod tests {
         assert_eq!(config.input_mode,"touchpad");
         assert_eq!(config.press_threshold,0.30);
         assert_eq!(config.haptic_amplitude,0.20);
+        assert_eq!(config.language,system_language());
+    }
+    #[test]
+    fn system_language_matching_and_english_fallback(){
+        assert_eq!(choose_language(["ru-RU"]),"ru");
+        assert_eq!(choose_language(["zh-Hans-CN"]),"zh-CN");
+        assert_eq!(choose_language(["pt-PT"]),"pt-BR");
+        assert_eq!(choose_language(["ko-KR","ja-JP"]),"ja");
+        assert_eq!(choose_language(["zh-TW","ko-KR"]),"en");
     }
     #[test]
     fn haptics_only_on_new_press_and_one_outstanding_request_per_controller(){
@@ -386,13 +466,19 @@ mod tests {
     fn config_round_trip(){
         let dir=std::env::temp_dir().join(format!("qptp-config-test-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         let file=dir.join("config.json");
-        let config=UserConfig{transport:"lan".into(),input_mode:"two_buttons".into(),press_threshold:0.45,haptic_amplitude:0.65};
+        let config=UserConfig{transport:"lan".into(),input_mode:"two_buttons".into(),press_threshold:0.45,haptic_amplitude:0.65,language:"ja".into()};
         write_user_config_file(&file,&config).unwrap();
         let loaded=read_user_config_file(&file).unwrap();
         assert_eq!(loaded.transport,config.transport);
         assert_eq!(loaded.input_mode,config.input_mode);
         assert_eq!(loaded.press_threshold,config.press_threshold);
         assert_eq!(loaded.haptic_amplitude,config.haptic_amplitude);
+        assert_eq!(loaded.language,config.language);
         std::fs::remove_file(file).unwrap();std::fs::remove_dir(dir).unwrap();
+    }
+    #[test]
+    fn supported_languages_are_validated(){
+        for language in ["ru","en","zh-CN","hi","es","ar","fr","bn","pt-BR","id","ja","de"]{assert!(valid_language(language));}
+        assert!(!valid_language("xx"));
     }
 }

@@ -7,6 +7,14 @@
 # Rust and Tauri build output
 /src-tauri/target/
 /src-tauri/gen/schemas/
+/openvr-aux/build-msvc/
+/openvr-aux/build/
+/openvr-aux/driver_qptp/bin/
+/openvr-proxy/
+/debug_udp.obj
+/driver.obj
+/driver.lib
+/driver.exp
 
 # Local configuration and secrets
 .env
