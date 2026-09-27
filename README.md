@@ -2,6 +2,8 @@
 
 A Windows app for viewing the additional touch sensors on Quest Pro Touch Pro controllers. It shows the connection state, each controller's status, and live touchpad values (X, Y, and force). The [qptp SteamVR auxiliary driver](openvr-aux/README.md) receives the same live input from this app and exposes it as one additional device alongside the stock Quest Pro controllers.
 
+![QPTP demonstration](docs/preview.webp)
+
 ## Requirements
 
 - Windows 10/11 with WebView2.
