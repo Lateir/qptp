@@ -5,7 +5,7 @@
   "resource_root": "qptp",
   "driver_name": "qptp",
   "input_bindingui_mode": "single_device",
-  "input_bindingui_left": { "image": "{qptp}/icons/qptp.svg" },
+  "input_bindingui_right": { "image": "{qptp}/icons/qptp.svg" },
   "input_source": {
     "/pose/raw": { "type": "pose", "order": 0 },
     "/input/left_pad": { "type": "trackpad", "touch": true, "force": true, "binding_image_point": [50, 55], "order": 1 },

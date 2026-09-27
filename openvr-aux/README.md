@@ -1,23 +1,27 @@
-# QPTP Auxiliary OpenVR driver
+# QPTP auxiliary OpenVR driver
 
-Один отдельный controller-class device с ролью `TrackedControllerRole_Treadmill`. Он не заменяет и не изменяет Quest Pro controllers. Все 12 компонентов (два pad по X/Y/touch/force и четыре кнопки) создаются в `Activate()` и остаются в профиле при любом режиме. Приложение QPTP передаёт реальные показания модуля в драйвер через локальный UDP. Источник ввода отделён интерфейсом `IInputSource`; внешний тестовый отправитель также доступен.
+The driver adds one controller-class device with a `TrackedControllerRole_Treadmill` hint alongside the normal Quest Pro controllers. It exposes two pads (X, Y, touch, and force) and four buttons: 12 input components in total. QPTP sends controller data to the driver over local UDP. The driver's `IInputSource` interface abstracts input reception; the included debug sender sends packets to the same UDP listener.
 
-## Сборка
+## Build
 
-Нужны Windows x64 и Visual Studio 2022 с C++ toolchain и CMake. В корне проекта:
+Use 64-bit Windows with the Visual Studio 2022 C++ tools. From the repository root, build with CMake:
 
 ```powershell
 cmake -S .\openvr-aux -B .\openvr-aux\build -G "Visual Studio 17 2022" -A x64
 cmake --build .\openvr-aux\build --config Release
 ```
 
-Если CMake не установлен, используйте `powershell -File .\openvr-aux\build-driver.ps1` с Visual Studio 2022 Build Tools.
+Alternatively, use the MSVC build script, which does not require a separate CMake installation:
 
-DLL окажется в `openvr-aux\driver_qptp\bin\win64`. OpenVR driver header взят из официального SDK, копия и его лицензия находятся в `vendor/openvr`. Для DLL не нужен `openvr_api.dll`: driver API предоставляет SteamVR через `IVRDriverContext`.
+```powershell
+powershell -File .\openvr-aux\build-driver.ps1
+```
 
-## Установка
+Both methods write `driver_qptp.dll` to `openvr-aux\driver_qptp\bin\win64`. The vendored OpenVR driver header and its license are in `openvr-aux\vendor\openvr`. The driver does not link against `openvr_api.dll`; SteamVR supplies the driver interfaces through `IVRDriverContext`.
 
-Закройте SteamVR. Укажите свой путь к SteamVR при необходимости:
+## Install
+
+Close SteamVR before changing driver registration or replacing the DLL. Adjust the SteamVR path if needed:
 
 ```powershell
 $vr = "C:\Program Files (x86)\Steam\steamapps\common\SteamVR"
@@ -26,25 +30,25 @@ $driver = (Resolve-Path .\openvr-aux\driver_qptp).Path
 & "$vr\bin\win64\vrpathreg.exe" show
 ```
 
-Запустите SteamVR с уже работающими Quest Pro controllers. Не устанавливайте одновременно прежний экспериментальный `qproxy` driver, если он был отдельно зарегистрирован: удалите его через `vrpathreg.exe removedriver <полный путь к старому driver_qproxy>`.
+Start SteamVR with the Quest Pro controllers connected. If you previously registered the experimental `qproxy` driver, remove its old registration with `vrpathreg.exe removedriver <path-to-driver_qproxy>`.
 
-Установщик QPTP включает этот пакет и автоматически регистрирует его при установке. `driver.vrdrivermanifest` задаёт `alwaysActivate=true`, чтобы SteamVR загрузил драйвер вместе с другим HMD. Формат этого манифеста не имеет поля для запуска обычного Windows-приложения; после загрузки установленный драйвер запускает соседний `qptp.exe`, если в настройках включено «Запускать и закрывать вместе со SteamVR» (включено по умолчанию). После потери связи с драйвером на пять секунд приложение завершится, если в текущем запуске уже было подключено к SteamVR. Повторные экземпляры приложения завершаются через single-instance mutex. Если SteamVR отсутствовал во время установки, запуск установленного приложения повторит регистрацию после появления SteamVR.
+The QPTP Windows installer bundles and registers this driver automatically. Its `driver.vrdrivermanifest` sets `alwaysActivate=true`, so SteamVR loads it alongside another headset driver. When installed beside `qptp.exe`, the driver launches the app on SteamVR startup if **Start and close with SteamVR** is enabled (the default). The app exits five seconds after losing the SteamVR connection if it connected during that run. Its single-instance mutex prevents duplicate app instances. If SteamVR was not installed when QPTP was installed, launching the installed app retries driver registration once SteamVR becomes available.
 
-## Проверка
+## Verify input and bindings
 
-1. В логе SteamVR `logs\vrserver.txt` найдите `[qptp] Driver initialized`, `Device registered`, `Device activated index=...`, `Input component created` и `Debug UDP listening`.
-2. В SteamVR откройте **Settings → Controllers → Manage Controller Bindings**, выберите приложение и откройте дополнительные bindings для устройства QPTP Auxiliary Input. Отдельный источник `/user/treadmill` содержит Left/Right Pad и четыре кнопки. Эта схема проверена в текущей установке SteamVR.
-3. Запустите приложение из проекта через `dev.bat` или `npm run tauri dev`. Подключите Quest-модуль по USB или LAN и выберите режим в приложении. В режиме **Touchpad** приложение передаёт X/Y/touch/force. В режимах **1 button** и **2 buttons** оно передаёт кнопки и обнуляет тачпады. При пропаже соединения всё обнуляется.
-4. В `vrserver.txt` появятся строки `Input update` с живыми значениями. Это проверяет путь от сенсоров приложения до `IVRDriverInput`. Для отдельной проверки без приложения отправьте `powershell -File .\openvr-aux\send-debug.ps1 -Mode touchpad -Side left -Touch -X 0.4 -Y -0.2 -Force 0.8`. Значения сбрасываются через 2 секунды без новых UDP пакетов.
-5. Назначьте, например, `left_pad` на movement и `right_extra_1/click` на действие игры. Проверьте, что штатные Quest Pro bindings продолжают отвечать.
+1. In SteamVR's `logs\vrserver.txt`, look for `[qptp] Driver initialized`, `Device registered`, `Device activated index=...`, `Input component created`, and `Debug UDP listening`.
+2. In **SteamVR Settings → Controllers → Manage Controller Bindings**, choose an application and select the additional **QPTP Auxiliary Input** device. Its `/user/treadmill` input source offers the left and right pads and four buttons. The binding editor shows both QPTP and the normal hand controllers; choosing QPTP does not replace the hand controllers.
+3. Run the QPTP app with `dev.bat` or `npm run tauri dev`, connect the Quest module over USB or LAN, and select an input mode. **Touchpad** sends X, Y, touch, and force. **Button** sends the first button on each side; **2 buttons** sends both. Button modes zero the pads, and lost module input is zeroed.
+4. Watch `vrserver.txt` for `Input update` entries. These confirm that packets reached the driver and its `IVRDriverInput` components; they do not alone prove that a particular application's action fired. To test the driver without the QPTP app, send a packet with `powershell -File .\openvr-aux\send-debug.ps1 -Mode touchpad -Side left -Touch -X 0.4 -Y -0.2 -Force 0.8`. Values reset two seconds after the last packet.
+5. Save a binding for the target application and test its action in that application. QPTP bindings have been confirmed to work with OVR Advanced Settings while the regular Quest Pro controller bindings remain available.
 
-Профиль находится в `resources/input/qptp_profile.json`. Для него указан обязательный `/pose/raw`. Устройство сообщает `deviceIsConnected=true`, `poseIsValid=false` и identity quaternion: реального tracking нет. Нужно проверить в запущенном SteamVR, принимает ли ваша версия input в таком состоянии. Если нет, следующий шаг — стационарный валидный pose без привязки к Quest. `Prop_RenderModelName_String` задан для идентификации, но 3D render model в MVP отсутствует; Binding UI использует отдельный SVG.
+The input profile is `driver_qptp/resources/input/qptp_profile.json`. It declares `/pose/raw` and uses `input_bindingui_mode: single_device` with `input_bindingui_right`. The driver reports a connected, stationary identity pose with `poseIsValid=true` and `TrackingResult_Running_OK`; it does not provide real spatial tracking. QPTP bindings worked with this pose in the tested SteamVR setup. The diagnostic `GetControllerRoleForTrackedDeviceIndex` call can still return `0` while QPTP bindings work, despite the treadmill role hint. The device sets a render model name for identification, but has no 3D model; the binding UI uses an SVG.
 
-UDP слушает только `127.0.0.1:39571`; формат — строки `key=value`, допускаются `\n` или запятые. Ключи: `left_pad_x`, `left_pad_y`, `left_pad_touch`, `left_pad_force`, аналоги `right_*`, а также `left_extra_1`, `left_extra_2`, `right_extra_1`, `right_extra_2`. X/Y ограничены [-1,1], force [0,1], bool — 0 или любое ненулевое число.
+The UDP listener accepts packets only on `127.0.0.1:39571`. Packets contain `key=value` pairs separated by newlines or commas. Keys are `left_pad_x`, `left_pad_y`, `left_pad_touch`, `left_pad_force`, the corresponding `right_*` keys, and `left_extra_1`, `left_extra_2`, `right_extra_1`, and `right_extra_2`. X and Y are clamped to [-1, 1], force to [0, 1], and any nonzero numeric value is true for a boolean input. The driver acknowledges received packets with `QPTP1`.
 
-## Удаление
+## Uninstall a manually registered driver
 
-Закройте SteamVR и выполните:
+Close SteamVR, then run:
 
 ```powershell
 $vr = "C:\Program Files (x86)\Steam\steamapps\common\SteamVR"
@@ -52,8 +56,4 @@ $driver = (Resolve-Path .\openvr-aux\driver_qptp).Path
 & "$vr\bin\win64\vrpathreg.exe" removedriver "$driver"
 ```
 
-После этого можно удалить папку драйвера. Логирование идёт через `IVRDriverLog` в `vrserver.txt`, включая коды ошибок свойств и input API. Частые обновления логируются только при получении пакета или сбросе; компоненты обновляются каждый кадр.
-
-## Проверка в текущем окружении
-
-DLL скомпилирована MSVC x64, приложение прошло `cargo test` и `npm run build`. В запущенном SteamVR зарегистрированы два штатных Quest Pro controller и один `qptp_input`. Лог подтвердил живые X/Y/touch/force из приложения; пользователь подтвердил работу в SteamVR. При использовании уже занятой роли Treadmill SteamVR выбирает лишь одно активное устройство этой роли.
+The driver directory can then be removed. The driver writes property and input API errors through `IVRDriverLog` to `vrserver.txt`. It updates components each frame and logs received input changes at most once per second.

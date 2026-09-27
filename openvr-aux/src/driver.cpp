@@ -120,8 +120,9 @@ public:
         pose_.qDriverFromHeadRotation.w = 1;
         pose_.qRotation.w = 1;
         pose_.deviceIsConnected = true;
-        pose_.poseIsValid = false;
-        pose_.result = vr::TrackingResult_Uninitialized;
+        // Keep a stationary valid pose so SteamVR can use this auxiliary input.
+        pose_.poseIsValid = true;
+        pose_.result = vr::TrackingResult_Running_OK;
     }
     vr::EVRInitError Activate(uint32_t id) override {
         id_ = id;
