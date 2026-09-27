@@ -23,14 +23,16 @@ mod windows {
         let x = if pad { sensor.x.min(255) as f32 / 127.5 - 1.0 } else { 0.0 };
         let y = if pad { 1.0 - sensor.y.min(255) as f32 / 127.5 } else { 0.0 };
         let force = if pad && sensor.force.is_finite() { sensor.force.clamp(0.0, 1.0) } else { 0.0 };
-        let first = live && snapshot.input_mode != "touchpad" && buttons[0];
-        let second = live && snapshot.input_mode == "two_buttons" && buttons[1];
+        let single = live && snapshot.input_mode == "button" && buttons[0];
+        let double_first = live && snapshot.input_mode == "two_buttons" && buttons[0];
+        let double_second = live && snapshot.input_mode == "two_buttons" && buttons[1];
         output.push(format!("{side}_pad_x={x:.5}"));
         output.push(format!("{side}_pad_y={y:.5}"));
         output.push(format!("{side}_pad_touch={}", u8::from(pad)));
         output.push(format!("{side}_pad_force={force:.5}"));
-        output.push(format!("{side}_extra_1={}", u8::from(first)));
-        output.push(format!("{side}_extra_2={}", u8::from(second)));
+        output.push(format!("{side}_single_button={}", u8::from(single)));
+        output.push(format!("{side}_double_button_1={}", u8::from(double_first)));
+        output.push(format!("{side}_double_button_2={}", u8::from(double_second)));
     }
 
     pub(super) fn publish(snapshot: &Snapshot) -> bool {
@@ -43,7 +45,7 @@ mod windows {
             });
         }
         let Some(link) = link.as_mut() else { return false };
-        let mut fields = Vec::with_capacity(12);
+        let mut fields = Vec::with_capacity(14);
         lines(snapshot, "left", &mut fields);
         lines(snapshot, "right", &mut fields);
         let _ = link.socket.send_to(fields.join("\n").as_bytes(), "127.0.0.1:39571");
@@ -71,21 +73,24 @@ mod windows {
             lines(&snapshot, "left", &mut fields);
             assert!(fields.iter().any(|s| s == "left_pad_x=1.00000"));
             assert!(fields.iter().any(|s| s == "left_pad_touch=1"));
-            assert!(fields.iter().any(|s| s == "left_extra_1=0"));
+            assert!(fields.iter().any(|s| s == "left_single_button=0"));
             snapshot.input_mode = "button".into();
             fields.clear();
             lines(&snapshot, "left", &mut fields);
             assert!(fields.iter().any(|s| s == "left_pad_touch=0"));
-            assert!(fields.iter().any(|s| s == "left_extra_1=1"));
-            assert!(fields.iter().any(|s| s == "left_extra_2=0"));
+            assert!(fields.iter().any(|s| s == "left_single_button=1"));
+            assert!(fields.iter().any(|s| s == "left_double_button_1=0"));
+            assert!(fields.iter().any(|s| s == "left_double_button_2=0"));
             snapshot.input_mode = "two_buttons".into();
             fields.clear();
             lines(&snapshot, "left", &mut fields);
-            assert!(fields.iter().any(|s| s == "left_extra_2=1"));
+            assert!(fields.iter().any(|s| s == "left_single_button=0"));
+            assert!(fields.iter().any(|s| s == "left_double_button_1=1"));
+            assert!(fields.iter().any(|s| s == "left_double_button_2=1"));
             snapshot.phase = "searching".into();
             fields.clear();
             lines(&snapshot, "left", &mut fields);
-            assert!(fields.iter().any(|s| s == "left_extra_1=0"));
+            assert!(fields.iter().any(|s| s == "left_single_button=0"));
             assert!(fields.iter().any(|s| s == "left_pad_touch=0"));
         }
     }

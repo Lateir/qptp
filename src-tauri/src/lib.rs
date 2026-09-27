@@ -1,21 +1,20 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{io::{self, Read, Write}, net::{TcpStream, UdpSocket}, path::{Path, PathBuf}, process::Command, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc, Mutex}, thread, time::{Duration, Instant}};
-use tauri::{image::Image, menu::{IconMenuItem, Menu, MenuItem, PredefinedMenuItem}, tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}, AppHandle, Emitter, Manager, RunEvent, State, WindowEvent, Wry};
+use tauri::{menu::{Menu, MenuItem, PredefinedMenuItem}, tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}, AppHandle, Emitter, Manager, RunEvent, State, WindowEvent, Wry};
 mod extra_ipc;
 #[cfg(windows)]
 pub mod steamvr_install;
 
 const PORT: u16 = 27182;
 const DISCOVERY_PORT: u16 = 27183;
-const RELEASE_THRESHOLD: f32 = 0.20;
 const HAPTIC_DURATION_MS: u16 = 2;
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
-struct UserConfig { transport: String, input_mode: String, press_threshold: f32, haptic_amplitude: f32, language: String, steamvr_lifecycle: bool }
+struct UserConfig { transport: String, input_mode: String, press_threshold: f32, release_threshold: f32, haptic_amplitude: f32, language: String, steamvr_lifecycle: bool }
 impl Default for UserConfig {
-    fn default()->Self { Self { transport:"lan".into(), input_mode:"touchpad".into(), press_threshold:0.30, haptic_amplitude:0.20, language:system_language().into(), steamvr_lifecycle:true } }
+    fn default()->Self { Self { transport:"lan".into(), input_mode:"touchpad".into(), press_threshold:0.30, release_threshold:0.20, haptic_amplitude:0.20, language:system_language().into(), steamvr_lifecycle:true } }
 }
 fn valid_mode(mode:&str)->bool {matches!(mode,"touchpad"|"button"|"two_buttons")}
 fn valid_language(language:&str)->bool {matches!(language,"ru"|"en"|"zh-CN"|"hi"|"es"|"ar"|"fr"|"bn"|"pt-BR"|"id"|"ja"|"de")}
@@ -48,7 +47,7 @@ fn system_language()->&'static str{
     let locale=std::env::var("LC_ALL").or_else(|_|std::env::var("LC_MESSAGES")).or_else(|_|std::env::var("LANG")).unwrap_or_default();
     choose_language([locale.as_str()])
 }
-fn valid_threshold(value:f32)->bool {value.is_finite()&&value>RELEASE_THRESHOLD&&value<=1.0}
+fn valid_threshold(value:f32)->bool {value.is_finite()&&(0.0..=1.0).contains(&value)}
 
 #[derive(Clone, Default, Serialize)]
 struct Sensor { x: u16, y: u16, force: f32 }
@@ -57,15 +56,19 @@ struct Sensor { x: u16, y: u16, force: f32 }
 struct Snapshot {
     phase: String, message: String, transport: String, endpoint: Option<String>,
     protocol: Option<String>, samples: u64, left: Sensor, right: Sensor, status: Option<Value>,
-    input_mode: String, press_threshold: f32, haptic_amplitude: f32, language: String, left_buttons: [bool;2], right_buttons: [bool;2],
+    input_mode: String, press_threshold: f32, release_threshold: f32, haptic_amplitude: f32, language: String, left_buttons: [bool;2], right_buttons: [bool;2],
     steamvr_connected: bool, steamvr_lifecycle: bool,
 }
 impl Default for Snapshot {
-    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"lan".into(), endpoint:None, protocol:None, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,haptic_amplitude:0.20,language:"ru".into(),left_buttons:[false;2],right_buttons:[false;2],steamvr_connected:false,steamvr_lifecycle:true } }
+    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"lan".into(), endpoint:None, protocol:None, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,release_threshold:0.20,haptic_amplitude:0.20,language:"ru".into(),left_buttons:[false;2],right_buttons:[false;2],steamvr_connected:false,steamvr_lifecycle:true } }
 }
 struct StreamState { snapshot: Mutex<Snapshot>, config_lock: Mutex<()>, generation: AtomicU64, adb_used: AtomicBool }
 type Shared = Arc<StreamState>;
-struct Tray { left: IconMenuItem<Wry>, right: IconMenuItem<Wry>, show: MenuItem<Wry>, quit: MenuItem<Wry>, last: Mutex<Option<(bool,bool)>> }
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct TrayController { connected: bool, battery: Option<u8> }
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct TrayStatus { left: TrayController, right: TrayController }
+struct Tray { controllers: MenuItem<Wry>, show: MenuItem<Wry>, quit: MenuItem<Wry>, last: Mutex<Option<TrayStatus>> }
 
 fn controller_connected(s:&Snapshot, side:&str)->bool {
     if s.phase!="connected" {return false}
@@ -73,23 +76,40 @@ fn controller_connected(s:&Snapshot, side:&str)->bool {
     let value=status.get(side).or_else(||status.get("controllers").and_then(|c|c.get(side)));
     value.and_then(|v|v.get("connected")).and_then(Value::as_bool).unwrap_or(false)
 }
-fn dot(on:bool)->Image<'static>{
-    let (r,g,b)=if on{(34,197,94)}else{(128,136,150)};
-    let mut px=Vec::with_capacity(16*16*4);
-    for y in 0..16{for x in 0..16{let d=((x as f32-7.5).powi(2)+(y as f32-7.5).powi(2)).sqrt();px.extend_from_slice(&[r,g,b,((6.5-d).clamp(0.0,1.0)*255.0) as u8])}}
-    Image::new_owned(px,16,16)
+fn tray_controller(s:&Snapshot, side:&str)->TrayController {
+    let connected=controller_connected(s,side);
+    let battery=if connected {
+        s.status.as_ref()
+            .and_then(|status|status.get(side).or_else(||status.get("controllers").and_then(|c|c.get(side))))
+            .and_then(|value|value.get("battery_percent").and_then(Value::as_f64)
+                .or_else(||value.get("battery").and_then(Value::as_f64)))
+            .filter(|value|value.is_finite())
+            .map(|value|value.round().clamp(0.0,100.0) as u8)
+    } else {None};
+    TrayController{connected,battery}
 }
-fn update_tray(app:&AppHandle, lr:(bool,bool)){
+fn tray_status(s:&Snapshot)->TrayStatus {
+    TrayStatus{left:tray_controller(s,"left"),right:tray_controller(s,"right")}
+}
+fn tray_label(status:TrayStatus)->String {
+    fn part(side:&str, controller:TrayController)->String {
+        let dot=if controller.connected{"✓"}else{"○"};
+        let battery=controller.battery.map(|value|format!("{value}%")).unwrap_or_else(||"—".into());
+        format!("{dot} {side} {battery}")
+    }
+    format!("{}    {}",part("L",status.left),part("R",status.right))
+}
+fn update_tray(app:&AppHandle, status:TrayStatus){
     let Some(tray)=app.try_state::<Tray>() else {return};
     let mut last=tray.last.lock().unwrap();
-    if *last==Some(lr) {return}
-    *last=Some(lr);
-    let _=tray.left.set_icon(Some(dot(lr.0)));let _=tray.right.set_icon(Some(dot(lr.1)));
+    if *last==Some(status) {return}
+    *last=Some(status);
+    let _=tray.controllers.set_text(tray_label(status));
 }
 fn publish(app:&AppHandle, state:&Shared, change:impl FnOnce(&mut Snapshot)) {
     // Tray is updated after the lock is released: menu calls block on the main thread.
-    let lr=match state.snapshot.lock() {Ok(mut snapshot)=>{change(&mut snapshot);snapshot.steamvr_connected=extra_ipc::publish(&snapshot);let _=app.emit("stream-state",snapshot.clone());(controller_connected(&snapshot,"left"),controller_connected(&snapshot,"right"))},Err(_)=>return};
-    update_tray(app,lr);
+    let status=match state.snapshot.lock() {Ok(mut snapshot)=>{change(&mut snapshot);snapshot.steamvr_connected=extra_ipc::publish(&snapshot);let _=app.emit("stream-state",snapshot.clone());tray_status(&snapshot)},Err(_)=>return};
+    update_tray(app,status);
 }
 fn adb_path(app:&AppHandle)->Result<PathBuf,String>{
     let dir=app.path().resource_dir().map_err(|e|e.to_string())?;
@@ -147,9 +167,9 @@ fn sensor(b:&[u8])->Sensor{
     // Module's Y axis is inverted relative to the pad; flip so 0 is the top.
     Sensor{x:u16::from_le_bytes([b[0],b[1]]),y:255u16.saturating_sub(u16::from_le_bytes([b[2],b[3]])),force:f32::from_le_bytes(b[4..8].try_into().unwrap())}
 }
-fn button_step(previous:[bool;2], sensor:&Sensor, mode:&str, press_threshold:f32)->[bool;2]{
+fn button_step(previous:[bool;2], sensor:&Sensor, mode:&str, press_threshold:f32, release_threshold:f32)->[bool;2]{
     // Raw (0, 0) is no touch. The decoded Y axis is flipped, so idle is (0, 255).
-    if mode=="touchpad" || (sensor.x==0&&sensor.y==255) || !sensor.force.is_finite() || sensor.force<=RELEASE_THRESHOLD {return [false;2]}
+    if mode=="touchpad" || (sensor.x==0&&sensor.y==255) || !sensor.force.is_finite() || sensor.force<release_threshold {return [false;2]}
     if previous[0]||previous[1] {return previous} // Keep the chosen half until release.
     if sensor.force<press_threshold {return [false;2]}
     if mode=="two_buttons" {[sensor.y<128,sensor.y>=128]} else {[true,false]}
@@ -196,8 +216,8 @@ fn read_frame(stream:&mut TcpStream, app:&AppHandle, state:&Shared, generation:u
                 if let Ok(mut s)=state.snapshot.lock(){
                     let previous=(s.left_buttons,s.right_buttons);
                     s.left=left;s.right=right;s.samples+=1;s.phase="connected".into();s.message="Поток сенсоров активен".into();s.protocol=Some("QPR2 / QPS1".into());
-                    s.left_buttons=if s.status.is_none()||controller_connected(&s,"left"){button_step(previous.0,&s.left,&s.input_mode,s.press_threshold)}else{[false;2]};
-                    s.right_buttons=if s.status.is_none()||controller_connected(&s,"right"){button_step(previous.1,&s.right,&s.input_mode,s.press_threshold)}else{[false;2]};
+                    s.left_buttons=if s.status.is_none()||controller_connected(&s,"left"){button_step(previous.0,&s.left,&s.input_mode,s.press_threshold,s.release_threshold)}else{[false;2]};
+                    s.right_buttons=if s.status.is_none()||controller_connected(&s,"right"){button_step(previous.1,&s.right,&s.input_mode,s.press_threshold,s.release_threshold)}else{[false;2]};
                     s.steamvr_connected=extra_ipc::publish(&s);
                     pulses=[new_press(previous.0,s.left_buttons),new_press(previous.1,s.right_buttons)];
                     amplitude=(s.haptic_amplitude*255.0).round() as u8;
@@ -264,6 +284,8 @@ fn load_user_config(app:&AppHandle)->UserConfig{
     if config.transport!="usb"&&config.transport!="lan"{config.transport="lan".into()}
     if !valid_mode(&config.input_mode){config.input_mode="touchpad".into()}
     if !valid_threshold(config.press_threshold){config.press_threshold=0.30}
+    if !valid_threshold(config.release_threshold){config.release_threshold=0.20}
+    if config.release_threshold>config.press_threshold{config.release_threshold=config.press_threshold}
     if !config.haptic_amplitude.is_finite()||!(0.0..=1.0).contains(&config.haptic_amplitude){config.haptic_amplitude=0.20}
     if !valid_language(&config.language){config.language="en".into()}
     config
@@ -272,10 +294,10 @@ fn save_user_config(app:&AppHandle,config:&UserConfig)->Result<(),String>{
     let file=config_file(app)?;
     write_user_config_file(&file,config)
 }
-fn config_from_snapshot(s:&Snapshot)->UserConfig{UserConfig{transport:s.transport.clone(),input_mode:s.input_mode.clone(),press_threshold:s.press_threshold,haptic_amplitude:s.haptic_amplitude,language:s.language.clone(),steamvr_lifecycle:s.steamvr_lifecycle}}
+fn config_from_snapshot(s:&Snapshot)->UserConfig{UserConfig{transport:s.transport.clone(),input_mode:s.input_mode.clone(),press_threshold:s.press_threshold,release_threshold:s.release_threshold,haptic_amplitude:s.haptic_amplitude,language:s.language.clone(),steamvr_lifecycle:s.steamvr_lifecycle}}
 fn start_worker(app:&AppHandle,state:&Shared,transport:String){
     let generation=state.generation.fetch_add(1,Ordering::SeqCst)+1;
-    publish(app,state,|s|{let input_mode=s.input_mode.clone();let press_threshold=s.press_threshold;let haptic_amplitude=s.haptic_amplitude;let language=s.language.clone();let steamvr_lifecycle=s.steamvr_lifecycle;*s=Snapshot{transport:transport.clone(),input_mode,press_threshold,haptic_amplitude,language,steamvr_lifecycle,..Snapshot::default()}});
+    publish(app,state,|s|{let input_mode=s.input_mode.clone();let press_threshold=s.press_threshold;let release_threshold=s.release_threshold;let haptic_amplitude=s.haptic_amplitude;let language=s.language.clone();let steamvr_lifecycle=s.steamvr_lifecycle;*s=Snapshot{transport:transport.clone(),input_mode,press_threshold,release_threshold,haptic_amplitude,language,steamvr_lifecycle,..Snapshot::default()}});
     let (app,shared)=(app.clone(),state.clone());thread::spawn(move||worker(app,shared,generation,transport));
 }
 #[tauri::command]
@@ -299,14 +321,15 @@ fn set_input_mode(app:AppHandle,state:State<Shared>,mode:String)->Result<(),Stri
     publish(&app,state.inner(),|s|{s.input_mode=mode;s.left_buttons=[false;2];s.right_buttons=[false;2]});Ok(())
 }
 #[tauri::command]
-fn set_press_threshold(app:AppHandle,state:State<Shared>,threshold:f32)->Result<(),String>{
-    if !valid_threshold(threshold){return Err("Порог нажатия должен быть больше 0.20 и не больше 1.00".into())}
+fn set_button_thresholds(app:AppHandle,state:State<Shared>,press:f32,release:f32)->Result<(),String>{
+    if !valid_threshold(press)||!valid_threshold(release)||release>press{return Err("Пороги должны быть в пределах 0–1; отпускание не выше нажатия".into())}
     let _guard=state.config_lock.lock().map_err(|e|e.to_string())?;
-    let threshold=(threshold*100.0).round()/100.0;
+    let press=(press*100.0).round()/100.0;
+    let release=(release*100.0).round()/100.0;
     let mut config=state.snapshot.lock().map(|s|config_from_snapshot(&s)).map_err(|e|e.to_string())?;
-    if (config.press_threshold-threshold).abs()<0.001{return Ok(())}
-    config.press_threshold=threshold;save_user_config(&app,&config)?;
-    publish(&app,state.inner(),|s|s.press_threshold=threshold);Ok(())
+    if (config.press_threshold-press).abs()<0.001&&(config.release_threshold-release).abs()<0.001{return Ok(())}
+    config.press_threshold=press;config.release_threshold=release;save_user_config(&app,&config)?;
+    publish(&app,state.inner(),|s|{s.press_threshold=press;s.release_threshold=release});Ok(())
 }
 #[tauri::command]
 fn set_haptic_amplitude(app:AppHandle,state:State<Shared>,amplitude:f32)->Result<(),String>{
@@ -387,18 +410,17 @@ fn tray_labels(language:&str)->(&'static str,&'static str){
     }
 }
 fn setup_tray(app:&AppHandle,language:&str)->tauri::Result<()>{
-    let left=IconMenuItem::with_id(app,"left","L",true,Some(dot(false)),None::<&str>)?;
-    let right=IconMenuItem::with_id(app,"right","R",true,Some(dot(false)),None::<&str>)?;
+    let controllers=MenuItem::with_id(app,"controllers","○ L —    ○ R —",true,None::<&str>)?;
     let (show_label,quit_label)=tray_labels(language);
     let show=MenuItem::with_id(app,"show",show_label,true,None::<&str>)?;
     let quit=MenuItem::with_id(app,"quit",quit_label,true,None::<&str>)?;
-    let menu=Menu::with_items(app,&[&left,&right,&PredefinedMenuItem::separator(app)?,&show,&quit])?;
+    let menu=Menu::with_items(app,&[&controllers,&PredefinedMenuItem::separator(app)?,&show,&quit])?;
     let mut tray=TrayIconBuilder::with_id("main").tooltip("Quest Pro Touch Plus").menu(&menu).show_menu_on_left_click(false)
         .on_menu_event(|app,e|match e.id().as_ref(){"show"=>show_window(app),"quit"=>app.exit(0),_=>{}})
         .on_tray_icon_event(|tray,e|if let TrayIconEvent::Click{button:MouseButton::Left,button_state:MouseButtonState::Up,..}=e{show_window(tray.app_handle())});
     if let Some(icon)=app.default_window_icon(){tray=tray.icon(icon.clone())}
     tray.build(app)?;
-    app.manage(Tray{left,right,show,quit,last:Mutex::new(None)});
+    app.manage(Tray{controllers,show,quit,last:Mutex::new(None)});
     Ok(())
 }
 pub fn run(){
@@ -410,7 +432,7 @@ pub fn run(){
             setup_tray(&handle,&config.language)?;
             let _=save_user_config(&handle,&config);
             let transport=config.transport.clone();
-            if let Ok(mut snapshot)=handle.state::<Shared>().snapshot.lock(){snapshot.input_mode=config.input_mode;snapshot.press_threshold=config.press_threshold;snapshot.haptic_amplitude=config.haptic_amplitude;snapshot.language=config.language;snapshot.steamvr_lifecycle=config.steamvr_lifecycle;}
+            if let Ok(mut snapshot)=handle.state::<Shared>().snapshot.lock(){snapshot.input_mode=config.input_mode;snapshot.press_threshold=config.press_threshold;snapshot.release_threshold=config.release_threshold;snapshot.haptic_amplitude=config.haptic_amplitude;snapshot.language=config.language;snapshot.steamvr_lifecycle=config.steamvr_lifecycle;}
             start_worker(&handle,handle.state::<Shared>().inner(),transport);
             watch_steamvr_lifecycle(handle.clone(),handle.state::<Shared>().inner().clone());
             #[cfg(all(windows, not(debug_assertions)))]
@@ -426,7 +448,7 @@ pub fn run(){
             WindowEvent::CloseRequested{..}=>window.app_handle().exit(0),
             _=>{}
         })
-        .invoke_handler(tauri::generate_handler![get_stream_state,set_transport,set_input_mode,set_press_threshold,set_haptic_amplitude,set_language,set_steamvr_lifecycle,open_module_page])
+        .invoke_handler(tauri::generate_handler![get_stream_state,set_transport,set_input_mode,set_button_thresholds,set_haptic_amplitude,set_language,set_steamvr_lifecycle,open_module_page])
         .build(tauri::generate_context!()).expect("tauri application error")
         .run(|app,event|match event{
             // Destroying the last window (tray mode) must not quit the app; explicit exit passes a code.
@@ -444,22 +466,36 @@ mod tests {
     use super::*;
     fn sample(y:u16,force:f32)->Sensor{Sensor{x:80,y,force}}
     #[test]
+    fn tray_shows_both_controller_batteries_on_one_line(){
+        let snapshot=Snapshot{phase:"connected".into(),status:Some(serde_json::json!({
+            "controllers":{
+                "left":{"connected":true,"battery_percent":78.6},
+                "right":{"connected":true,"battery":42}
+            }
+        })),..Snapshot::default()};
+        assert_eq!(tray_label(tray_status(&snapshot)),"✓ L 79%    ✓ R 42%");
+        let disconnected=Snapshot{phase:"searching".into(),..snapshot};
+        assert_eq!(tray_label(tray_status(&disconnected)),"○ L —    ○ R —");
+    }
+    #[test]
     fn button_hysteresis(){
         let idle=[false;2];
-        assert_eq!(button_step(idle,&sample(80,0.29),"button",0.30),idle);
-        let pressed=button_step(idle,&sample(80,0.30),"button",0.30);
+        assert_eq!(button_step(idle,&sample(80,0.29),"button",0.30,0.20),idle);
+        let pressed=button_step(idle,&sample(80,0.30),"button",0.30,0.20);
         assert_eq!(pressed,[true,false]);
-        assert_eq!(button_step(pressed,&sample(80,0.21),"button",0.30),pressed);
-        assert_eq!(button_step(pressed,&sample(80,0.20),"button",0.30),idle);
+        assert_eq!(button_step(pressed,&sample(80,0.20),"button",0.30,0.20),pressed);
+        assert_eq!(button_step(pressed,&sample(80,0.19),"button",0.30,0.20),idle);
+        assert_eq!(button_step(idle,&sample(80,0.0),"button",0.0,0.0),[true,false]);
+        assert_eq!(button_step(idle,&sample(80,1.0),"button",1.0,1.0),[true,false]);
     }
     #[test]
     fn two_buttons_latch_the_initial_half(){
-        let left=button_step([false;2],&sample(127,0.35),"two_buttons",0.30);
+        let left=button_step([false;2],&sample(127,0.35),"two_buttons",0.30,0.20);
         assert_eq!(left,[true,false]);
-        assert_eq!(button_step(left,&sample(200,0.35),"two_buttons",0.30),left);
-        assert_eq!(button_step([false;2],&sample(128,0.35),"two_buttons",0.30),[false,true]);
-        assert_eq!(button_step(left,&Sensor{x:0,y:255,force:0.35},"two_buttons",0.30),[false;2]);
-        assert_eq!(button_step(left,&sample(80,0.35),"touchpad",0.30),[false;2]);
+        assert_eq!(button_step(left,&sample(200,0.35),"two_buttons",0.30,0.20),left);
+        assert_eq!(button_step([false;2],&sample(128,0.35),"two_buttons",0.30,0.20),[false,true]);
+        assert_eq!(button_step(left,&Sensor{x:0,y:255,force:0.35},"two_buttons",0.30,0.20),[false;2]);
+        assert_eq!(button_step(left,&sample(80,0.35),"touchpad",0.30,0.20),[false;2]);
     }
     #[test]
     fn config_defaults_missing_fields(){
@@ -467,6 +503,7 @@ mod tests {
         assert_eq!(config.transport,"lan");
         assert_eq!(config.input_mode,"touchpad");
         assert_eq!(config.press_threshold,0.30);
+        assert_eq!(config.release_threshold,0.20);
         assert_eq!(config.haptic_amplitude,0.20);
         assert_eq!(config.language,system_language());
     }
@@ -497,12 +534,13 @@ mod tests {
     fn config_round_trip(){
         let dir=std::env::temp_dir().join(format!("qptp-config-test-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         let file=dir.join("config.json");
-        let config=UserConfig{transport:"lan".into(),input_mode:"two_buttons".into(),press_threshold:0.45,haptic_amplitude:0.65,language:"ja".into(),steamvr_lifecycle:false};
+        let config=UserConfig{transport:"lan".into(),input_mode:"two_buttons".into(),press_threshold:0.45,release_threshold:0.12,haptic_amplitude:0.65,language:"ja".into(),steamvr_lifecycle:false};
         write_user_config_file(&file,&config).unwrap();
         let loaded=read_user_config_file(&file).unwrap();
         assert_eq!(loaded.transport,config.transport);
         assert_eq!(loaded.input_mode,config.input_mode);
         assert_eq!(loaded.press_threshold,config.press_threshold);
+        assert_eq!(loaded.release_threshold,config.release_threshold);
         assert_eq!(loaded.haptic_amplitude,config.haptic_amplitude);
         assert_eq!(loaded.language,config.language);
         assert!(!loaded.steamvr_lifecycle);

@@ -13,7 +13,8 @@ param(
 $lines = @(
     'left_pad_x=0', 'left_pad_y=0', 'left_pad_touch=0', 'left_pad_force=0',
     'right_pad_x=0', 'right_pad_y=0', 'right_pad_touch=0', 'right_pad_force=0',
-    'left_extra_1=0', 'left_extra_2=0', 'right_extra_1=0', 'right_extra_2=0'
+    'left_single_button=0', 'left_double_button_1=0', 'left_double_button_2=0',
+    'right_single_button=0', 'right_double_button_1=0', 'right_double_button_2=0'
 )
 if ($Mode -eq 'touchpad') {
     $lines += "${Side}_pad_x=$($X.ToString([cultureinfo]::InvariantCulture))"
@@ -21,9 +22,10 @@ if ($Mode -eq 'touchpad') {
     $lines += "${Side}_pad_touch=$([int]$Touch.IsPresent)"
     $lines += "${Side}_pad_force=$($Force.ToString([cultureinfo]::InvariantCulture))"
 }
-if ($Mode -eq 'one-button' -or $Mode -eq 'two-buttons') {
-    $lines += "${Side}_extra_1=$([int]$Button1.IsPresent)"
-    if ($Mode -eq 'two-buttons') { $lines += "${Side}_extra_2=$([int]$Button2.IsPresent)" }
+if ($Mode -eq 'one-button') { $lines += "${Side}_single_button=$([int]$Button1.IsPresent)" }
+if ($Mode -eq 'two-buttons') {
+    $lines += "${Side}_double_button_1=$([int]$Button1.IsPresent)"
+    $lines += "${Side}_double_button_2=$([int]$Button2.IsPresent)"
 }
 $client = [System.Net.Sockets.UdpClient]::new()
 try {

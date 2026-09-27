@@ -63,10 +63,12 @@ bool DebugUdpInputSource::Poll(InputState& state) {
                     else if (key == "right_pad_y") state.right.pad.y = two;
                     else if (key == "right_pad_touch") state.right.pad.touch = on;
                     else if (key == "right_pad_force") state.right.pad.force = one;
-                    else if (key == "left_extra_1") state.left.extra1 = on;
-                    else if (key == "left_extra_2") state.left.extra2 = on;
-                    else if (key == "right_extra_1") state.right.extra1 = on;
-                    else if (key == "right_extra_2") state.right.extra2 = on;
+                    else if (key == "left_single_button") state.left.single_button = on;
+                    else if (key == "left_double_button_1") state.left.double_button_1 = on;
+                    else if (key == "left_double_button_2") state.left.double_button_2 = on;
+                    else if (key == "right_single_button") state.right.single_button = on;
+                    else if (key == "right_double_button_1") state.right.double_button_1 = on;
+                    else if (key == "right_double_button_2") state.right.double_button_2 = on;
                 }
             }
             if (end == std::string::npos) break;

@@ -9,9 +9,9 @@ import { detectLanguage, isLanguage, languages, translate, type Language, type T
 type Mode = 'usb' | 'lan'
 type InputMode = 'touchpad' | 'button' | 'two_buttons'
 type Side = { x:number; y:number; force:number }
-type Snapshot = { phase:string; message:string; transport:Mode; endpoint?:string; protocol?:string; samples:number; left:Side; right:Side; status?:Record<string,unknown>; inputMode:InputMode; pressThreshold:number; hapticAmplitude:number; language:Language; leftButtons:[boolean,boolean]; rightButtons:[boolean,boolean]; steamvrConnected:boolean; steamvrLifecycle:boolean }
+type Snapshot = { phase:string; message:string; transport:Mode; endpoint?:string; protocol?:string; samples:number; left:Side; right:Side; status?:Record<string,unknown>; inputMode:InputMode; pressThreshold:number; releaseThreshold:number; hapticAmplitude:number; language:Language; leftButtons:[boolean,boolean]; rightButtons:[boolean,boolean]; steamvrConnected:boolean; steamvrLifecycle:boolean }
 const zero={x:0,y:0,force:0}
-const snap=ref<Snapshot>({phase:'searching',message:'Поиск устройства…',transport:'lan',samples:0,left:zero,right:zero,inputMode:'touchpad',pressThreshold:0.30,hapticAmplitude:0.20,language:'ru',leftButtons:[false,false],rightButtons:[false,false],steamvrConnected:false,steamvrLifecycle:true})
+const snap=ref<Snapshot>({phase:'searching',message:'Поиск устройства…',transport:'lan',samples:0,left:zero,right:zero,inputMode:'touchpad',pressThreshold:0.30,releaseThreshold:0.20,hapticAmplitude:0.20,language:'ru',leftButtons:[false,false],rightButtons:[false,false],steamvrConnected:false,steamvrLifecycle:true})
 const mode=ref<Mode>('lan'),tab=ref<'mode'|'status'|'settings'>('status'),busy=ref(false)
 const inputBusy=ref(false),inputError=ref('')
 const linkError=ref(''),settingsError=ref(''),languageBusy=ref(false),lifecycleBusy=ref(false)
@@ -26,7 +26,7 @@ const phaseHint=computed(()=>t((snap.value.phase==='connected'?'connectedHint':s
 watch(language,value=>{document.documentElement.lang=value;document.documentElement.dir=value==='ar'?'rtl':'ltr';localStorage.setItem('qptp-language',value)},{immediate:true})
 async function select(next:Mode){if(next===mode.value)return;mode.value=next;busy.value=true;try{await invoke('set_transport',{transport:next})}catch(e){snap.value={...snap.value,phase:'error',message:String(e)}}finally{busy.value=false}}
 async function selectInputMode(next:InputMode){if(next===snap.value.inputMode)return;inputError.value='';if(!isTauri()){snap.value={...snap.value,inputMode:next,leftButtons:[false,false],rightButtons:[false,false]};return}inputBusy.value=true;try{await invoke('set_input_mode',{mode:next})}catch(e){inputError.value=String(e)}finally{inputBusy.value=false}}
-async function savePressThreshold(threshold:number){inputError.value='';if(!isTauri()){snap.value={...snap.value,pressThreshold:threshold};return}inputBusy.value=true;try{await invoke('set_press_threshold',{threshold})}catch(e){inputError.value=String(e)}finally{inputBusy.value=false}}
+async function saveButtonThresholds(press:number,release:number){inputError.value='';if(!isTauri()){snap.value={...snap.value,pressThreshold:press,releaseThreshold:release};return}inputBusy.value=true;try{await invoke('set_button_thresholds',{press,release})}catch(e){inputError.value=String(e)}finally{inputBusy.value=false}}
 async function saveHapticAmplitude(amplitude:number){inputError.value='';if(!isTauri()){snap.value={...snap.value,hapticAmplitude:amplitude};return}inputBusy.value=true;try{await invoke('set_haptic_amplitude',{amplitude})}catch(e){inputError.value=String(e)}finally{inputBusy.value=false}}
 async function changeLanguage(event:Event){const next=(event.target as HTMLSelectElement).value;if(!isLanguage(next)||next===language.value)return;settingsError.value='';languageBusy.value=true;try{if(isTauri())await invoke('set_language',{language:next});language.value=next;snap.value={...snap.value,language:next}}catch{settingsError.value=t('saveError');(event.target as HTMLSelectElement).value=language.value}finally{languageBusy.value=false}}
 async function changeSteamvrLifecycle(event:Event){const enabled=(event.target as HTMLInputElement).checked;settingsError.value='';lifecycleBusy.value=true;try{if(isTauri())await invoke('set_steamvr_lifecycle',{enabled});snap.value={...snap.value,steamvrLifecycle:enabled}}catch{settingsError.value=t('saveError');(event.target as HTMLInputElement).checked=snap.value.steamvrLifecycle}finally{lifecycleBusy.value=false}}
@@ -39,7 +39,7 @@ onUnmounted(()=>unlisten?.())
 </script>
 <template>
 <div class="app">
-  <TouchPad v-bind="snap.left" :live="online('left')" :mode="snap.inputMode" :buttons="snap.leftButtons" :threshold="snap.pressThreshold" :language="language"/>
+  <TouchPad v-bind="snap.left" :live="online('left')" :mode="snap.inputMode" :buttons="snap.leftButtons" :threshold="snap.pressThreshold" :release-threshold="snap.releaseThreshold" :language="language"/>
   <main class="center">
     <h1 v-if="tab!=='settings'">Quest Pro <em>touch</em> Plus</h1>
     <div class="view">
@@ -55,7 +55,7 @@ onUnmounted(()=>unlisten?.())
         </div>
       </template>
       <template v-else-if="tab==='mode'">
-        <ModePanel :mode="snap.inputMode" :press-threshold="snap.pressThreshold" :haptic-amplitude="snap.hapticAmplitude" :busy="inputBusy" :language="language" @select="selectInputMode" @threshold="savePressThreshold" @amplitude="saveHapticAmplitude"/>
+        <ModePanel :mode="snap.inputMode" :press-threshold="snap.pressThreshold" :release-threshold="snap.releaseThreshold" :haptic-amplitude="snap.hapticAmplitude" :busy="inputBusy" :language="language" @select="selectInputMode" @thresholds="saveButtonThresholds" @amplitude="saveHapticAmplitude"/>
         <p v-if="inputError" class="mode-error" role="alert">{{t('saveError')}}</p>
       </template>
       <div v-else class="settings-view">
@@ -75,6 +75,6 @@ onUnmounted(()=>unlisten?.())
     </div>
     <nav class="tabs"><button v-for="item in tabs" :key="item.id" :class="{active:tab===item.id}" @click="tab=item.id">{{t(item.label)}}</button></nav>
   </main>
-  <TouchPad v-bind="snap.right" :live="online('right')" :mode="snap.inputMode" :buttons="snap.rightButtons" :threshold="snap.pressThreshold" :language="language"/>
+  <TouchPad v-bind="snap.right" :live="online('right')" :mode="snap.inputMode" :buttons="snap.rightButtons" :threshold="snap.pressThreshold" :release-threshold="snap.releaseThreshold" :language="language"/>
 </div>
 </template>

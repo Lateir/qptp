@@ -3,5 +3,6 @@
 <text x="110" y="25" text-anchor="middle" fill="white" font-family="Arial" font-size="13">QPTP Auxiliary Input</text>
 <rect x="20" y="38" width="60" height="60" rx="8" fill="#34666e" stroke="#8ce9dd"/><rect x="140" y="38" width="60" height="60" rx="8" fill="#34666e" stroke="#8ce9dd"/>
 <text x="50" y="75" text-anchor="middle" fill="white" font-family="Arial">LEFT</text><text x="170" y="75" text-anchor="middle" fill="white" font-family="Arial">RIGHT</text>
-<circle cx="32" cy="125" r="10" fill="#55d6d0"/><circle cx="75" cy="125" r="10" fill="#55d6d0"/><circle cx="145" cy="125" r="10" fill="#55d6d0"/><circle cx="188" cy="125" r="10" fill="#55d6d0"/>
+<circle cx="25" cy="125" r="8" fill="#55d6d0"/><circle cx="50" cy="125" r="8" fill="#55d6d0"/><circle cx="75" cy="125" r="8" fill="#55d6d0"/>
+<circle cx="145" cy="125" r="8" fill="#55d6d0"/><circle cx="170" cy="125" r="8" fill="#55d6d0"/><circle cx="195" cy="125" r="8" fill="#55d6d0"/>
 </svg>

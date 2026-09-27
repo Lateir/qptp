@@ -67,8 +67,9 @@ struct PadHandles {
 };
 struct HandHandles {
     PadHandles pad;
-    vr::VRInputComponentHandle_t extra1 = vr::k_ulInvalidInputComponentHandle;
-    vr::VRInputComponentHandle_t extra2 = vr::k_ulInvalidInputComponentHandle;
+    vr::VRInputComponentHandle_t single_button = vr::k_ulInvalidInputComponentHandle;
+    vr::VRInputComponentHandle_t double_button_1 = vr::k_ulInvalidInputComponentHandle;
+    vr::VRInputComponentHandle_t double_button_2 = vr::k_ulInvalidInputComponentHandle;
 };
 class AuxiliaryDevice final : public vr::ITrackedDeviceServerDriver {
     uint32_t id_ = vr::k_unTrackedDeviceIndexInvalid;
@@ -98,8 +99,9 @@ class AuxiliaryDevice final : public vr::ITrackedDeviceServerDriver {
         make("pad/y"); Scalar(container, path, hand.pad.y, vr::VRScalarUnits_NormalizedTwoSided);
         make("pad/touch"); Boolean(container, path, hand.pad.touch);
         make("pad/force"); Scalar(container, path, hand.pad.force, vr::VRScalarUnits_NormalizedOneSided);
-        make("extra_1/click"); Boolean(container, path, hand.extra1);
-        make("extra_2/click"); Boolean(container, path, hand.extra2);
+        make("single_button/click"); Boolean(container, path, hand.single_button);
+        make("double_button_1/click"); Boolean(container, path, hand.double_button_1);
+        make("double_button_2/click"); Boolean(container, path, hand.double_button_2);
     }
     void UpdateScalar(vr::VRInputComponentHandle_t handle, float value) {
         const auto error = vr::VRDriverInput()->UpdateScalarComponent(handle, value, 0);
@@ -112,7 +114,9 @@ class AuxiliaryDevice final : public vr::ITrackedDeviceServerDriver {
     void UpdateHand(const HandHandles& h, const AddonState& s) {
         UpdateScalar(h.pad.x, s.pad.x); UpdateScalar(h.pad.y, s.pad.y);
         UpdateBoolean(h.pad.touch, s.pad.touch); UpdateScalar(h.pad.force, s.pad.force);
-        UpdateBoolean(h.extra1, s.extra1); UpdateBoolean(h.extra2, s.extra2);
+        UpdateBoolean(h.single_button, s.single_button);
+        UpdateBoolean(h.double_button_1, s.double_button_1);
+        UpdateBoolean(h.double_button_2, s.double_button_2);
     }
 public:
     AuxiliaryDevice() {
@@ -156,9 +160,9 @@ public:
             std::chrono::steady_clock::now() - last_log_ >= std::chrono::seconds(1))) {
             last_log_ = std::chrono::steady_clock::now();
             char line[256];
-            std::snprintf(line, sizeof(line), "[qptp] Input update L=(%.2f,%.2f,t%d,f%.2f,b%d,b%d) R=(%.2f,%.2f,t%d,f%.2f,b%d,b%d)",
-                state.left.pad.x, state.left.pad.y, state.left.pad.touch, state.left.pad.force, state.left.extra1, state.left.extra2,
-                state.right.pad.x, state.right.pad.y, state.right.pad.touch, state.right.pad.force, state.right.extra1, state.right.extra2);
+            std::snprintf(line, sizeof(line), "[qptp] Input update L=(%.2f,%.2f,t%d,f%.2f,s%d,d%d,d%d) R=(%.2f,%.2f,t%d,f%.2f,s%d,d%d,d%d)",
+                state.left.pad.x, state.left.pad.y, state.left.pad.touch, state.left.pad.force, state.left.single_button, state.left.double_button_1, state.left.double_button_2,
+                state.right.pad.x, state.right.pad.y, state.right.pad.touch, state.right.pad.force, state.right.single_button, state.right.double_button_1, state.right.double_button_2);
             Log(line);
         }
     }
