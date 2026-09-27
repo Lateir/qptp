@@ -54,3 +54,7 @@ You can select the interface language in **Settings**. The list contains English
 The protocol and Quest module are documented in [qptp-module](https://github.com/Lateir/qptp-module). ADB is distributed with the Android Platform Tools `NOTICE.txt`.
 
 When using LAN, connect over a trusted local network: the current module does not authenticate TCP clients.
+
+## License
+
+This project's original code is available under [0BSD](LICENSE). Bundled third-party components retain their own licenses and notices.
