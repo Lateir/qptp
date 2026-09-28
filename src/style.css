@@ -120,10 +120,28 @@ h1 em{font-style:normal;font-weight:250;color:var(--muted)}
 .module-link:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .module-link b{font-size:11px;font-weight:700}
 .module-link span{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.update-card{width:304px;min-height:100px;padding:10px 12px;border:1px solid var(--line);border-radius:14px;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;text-align:center}
+.update-card b{font-size:11px;font-weight:700}
+.update-card small{max-width:270px;font-size:10px;line-height:1.35;color:var(--muted)}
+.update-card button{padding:1px 3px;border:0;background:transparent;color:var(--muted);font-family:var(--mono);font-size:10px;cursor:pointer}
+.update-card button:hover{color:var(--ink);text-decoration:underline}
+.update-card button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.updates-view{width:304px;display:flex;flex-direction:column;align-items:stretch;gap:10px}
+.updates-view h2{margin:0 0 2px;font-size:14px;font-weight:700;text-align:center}
+.release-row{min-height:57px;padding:9px 13px;border:1px solid var(--line);border-radius:14px;background:var(--surface);display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:start;transition:border-color .15s}
+.release-row:hover{border-color:var(--ink)}
+.release-row:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.release-row b{font-size:11px}
+.release-row span{font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap}
 .link-error{max-width:320px;margin:0;font-size:10px;color:#e5484d;text-align:center}
 .credit{margin-top:1px}
 
+.navigation{position:relative;display:flex;justify-content:center;direction:ltr}
 .tabs{display:flex;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
 .tabs button{padding:6px 18px;border-radius:999px;font-size:13px;font-weight:500;color:var(--muted);transition:background .15s,color .15s}
 .tabs button:hover{color:var(--ink)}
 .tabs button.active{background:var(--chip);color:var(--chip-ink)}
+.update-shortcut{position:absolute;left:calc(100% + 10px);top:0;width:100%;max-width:38px;height:100%;border-radius:50%;background:var(--on);color:#fff;font-size:21px;font-weight:700;line-height:1;transition:filter .15s,transform .15s}
+.update-shortcut:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.update-shortcut:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.update-shortcut.active{box-shadow:0 0 0 2px var(--ink)}

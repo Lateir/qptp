@@ -24,6 +24,7 @@ const ru = {
   touchpadNote: 'Положение и усилие без виртуальных кнопок', pressStrength: 'Нажатие', releaseAt: 'Отпускание', hapticPower: 'Мощность вибрации',
   force: 'УСИЛИЕ', upper: 'ВЕРХ', lower: 'НИЗ', threshold: 'Порог',
   bundledAdb: 'встроенный ADB', autoDiscovery: 'автообнаружение', moduleRequired: 'Нужен запущенный qptp-module на Quest Pro',
+    updateRequired: "Обновите модуль Quest Pro Touch Plus", magiskUpdateHint: "Можно обновить в Magisk: нажмите «Обновить» на модуле", updateAvailable: "Доступно обновление", moduleLabel: "Модуль", appLabel: "Приложение", compatibleReleasePending: "Совместимый релиз пока не найден",
   language: 'Язык', steamvrLifecycle: 'Запускать и закрывать вместе со SteamVR', saveError: 'Не удалось сохранить настройку', openError: 'Не удалось открыть ссылку',
 } as const
 
@@ -41,6 +42,7 @@ const strings: Record<Language, Messages> = {
     touchpadNote: 'Position and force without virtual buttons', pressStrength: 'Press', releaseAt: 'Release', hapticPower: 'Vibration strength',
     force: 'FORCE', upper: 'TOP', lower: 'BOTTOM', threshold: 'Threshold',
     bundledAdb: 'bundled ADB', autoDiscovery: 'auto discovery', moduleRequired: 'qptp-module must run on Quest Pro',
+    updateRequired: "Update the Quest Pro Touch Plus module", magiskUpdateHint: "You can also tap Update for the module in Magisk", updateAvailable: "Update available", moduleLabel: "Module", appLabel: "App", compatibleReleasePending: "No compatible release has been found yet",
     language: 'Language', steamvrLifecycle: 'Start and exit with SteamVR', saveError: 'Could not save the setting', openError: 'Could not open the link',
   },
   'zh-CN': {
@@ -52,6 +54,7 @@ const strings: Record<Language, Messages> = {
     touchpadNote: '仅使用位置和压力，无虚拟按钮', pressStrength: '按下', releaseAt: '松开', hapticPower: '振动强度',
     force: '压力', upper: '上', lower: '下', threshold: '阈值',
     bundledAdb: '内置 ADB', autoDiscovery: '自动发现', moduleRequired: '请在 Quest Pro 上运行 qptp-module',
+    updateRequired: "更新 Quest Pro Touch Plus 模块", magiskUpdateHint: "也可在 Magisk 中点击模块的“更新”", updateAvailable: "有可用更新", moduleLabel: "模块", appLabel: "应用", compatibleReleasePending: "尚未找到兼容版本",
     language: '语言', steamvrLifecycle: '随 SteamVR 启动和关闭', saveError: '无法保存设置', openError: '无法打开链接',
   },
   hi: {
@@ -63,6 +66,7 @@ const strings: Record<Language, Messages> = {
     touchpadNote: 'बिना वर्चुअल बटन के स्थिति और दबाव', pressStrength: 'दबाएँ', releaseAt: 'छोड़ें', hapticPower: 'कंपन की तीव्रता',
     force: 'दबाव', upper: 'ऊपर', lower: 'नीचे', threshold: 'सीमा',
     bundledAdb: 'अंतर्निहित ADB', autoDiscovery: 'स्वतः खोज', moduleRequired: 'Quest Pro पर qptp-module चालू होना चाहिए',
+    updateRequired: "Quest Pro Touch Plus मॉड्यूल अपडेट करें", magiskUpdateHint: "Magisk में मॉड्यूल पर अपडेट भी दबा सकते हैं", updateAvailable: "अपडेट उपलब्ध है", moduleLabel: "मॉड्यूल", appLabel: "ऐप", compatibleReleasePending: "संगत रिलीज़ अभी नहीं मिली है",
     language: 'भाषा', steamvrLifecycle: 'SteamVR के साथ शुरू और बंद करें', saveError: 'सेटिंग सहेजी नहीं जा सकी', openError: 'लिंक नहीं खुल सका',
   },
   es: {
@@ -74,6 +78,7 @@ const strings: Record<Language, Messages> = {
     touchpadNote: 'Posición y presión sin botones virtuales', pressStrength: 'Pulsar', releaseAt: 'Soltar', hapticPower: 'Intensidad de vibración',
     force: 'FUERZA', upper: 'ARRIBA', lower: 'ABAJO', threshold: 'Umbral',
     bundledAdb: 'ADB incluido', autoDiscovery: 'detección automática', moduleRequired: 'qptp-module debe ejecutarse en Quest Pro',
+    updateRequired: "Actualiza el módulo Quest Pro Touch Plus", magiskUpdateHint: "También puedes pulsar Actualizar en el módulo de Magisk", updateAvailable: "Actualización disponible", moduleLabel: "Módulo", appLabel: "Aplicación", compatibleReleasePending: "Aún no se ha encontrado una versión compatible",
     language: 'Idioma', steamvrLifecycle: 'Iniciar y cerrar con SteamVR', saveError: 'No se pudo guardar el ajuste', openError: 'No se pudo abrir el enlace',
   },
   ar: {
@@ -85,6 +90,7 @@ const strings: Record<Language, Messages> = {
     touchpadNote: 'الموضع والضغط دون أزرار افتراضية', pressStrength: 'الضغط', releaseAt: 'التحرير', hapticPower: 'شدة الاهتزاز',
     force: 'الضغط', upper: 'أعلى', lower: 'أسفل', threshold: 'الحد',
     bundledAdb: 'ADB مدمج', autoDiscovery: 'اكتشاف تلقائي', moduleRequired: 'يجب تشغيل qptp-module على Quest Pro',
+    updateRequired: "حدّث وحدة Quest Pro Touch Plus", magiskUpdateHint: "يمكنك أيضًا الضغط على تحديث للوحدة في Magisk", updateAvailable: "يتوفر تحديث", moduleLabel: "الوحدة", appLabel: "التطبيق", compatibleReleasePending: "لم يُعثر بعد على إصدار متوافق",
     language: 'اللغة', steamvrLifecycle: 'التشغيل والإغلاق مع SteamVR', saveError: 'تعذر حفظ الإعداد', openError: 'تعذر فتح الرابط',
   },
   fr: {
@@ -96,6 +102,7 @@ const strings: Record<Language, Messages> = {
     touchpadNote: 'Position et pression sans boutons virtuels', pressStrength: 'Appui', releaseAt: 'Relâchement', hapticPower: 'Intensité des vibrations',
     force: 'PRESSION', upper: 'HAUT', lower: 'BAS', threshold: 'Seuil',
     bundledAdb: 'ADB intégré', autoDiscovery: 'détection auto', moduleRequired: 'qptp-module doit tourner sur Quest Pro',
+    updateRequired: "Mettez à jour le module Quest Pro Touch Plus", magiskUpdateHint: "Vous pouvez aussi toucher Mettre à jour dans Magisk", updateAvailable: "Mise à jour disponible", moduleLabel: "Module", appLabel: "Application", compatibleReleasePending: "Aucune version compatible trouvée pour le moment",
     language: 'Langue', steamvrLifecycle: 'Démarrer et fermer avec SteamVR', saveError: 'Impossible d’enregistrer le réglage', openError: 'Impossible d’ouvrir le lien',
   },
   bn: {
@@ -107,6 +114,7 @@ const strings: Record<Language, Messages> = {
     touchpadNote: 'ভার্চুয়াল বোতাম ছাড়া অবস্থান ও চাপ', pressStrength: 'চাপুন', releaseAt: 'ছাড়ুন', hapticPower: 'কম্পনের মাত্রা',
     force: 'চাপ', upper: 'উপরে', lower: 'নিচে', threshold: 'সীমা',
     bundledAdb: 'অন্তর্ভুক্ত ADB', autoDiscovery: 'স্বয়ংক্রিয় খোঁজ', moduleRequired: 'Quest Pro-তে qptp-module চালু থাকতে হবে',
+    updateRequired: "Quest Pro Touch Plus মডিউল আপডেট করুন", magiskUpdateHint: "Magisk-এ মডিউলের আপডেট বোতামও চাপতে পারেন", updateAvailable: "আপডেট উপলব্ধ", moduleLabel: "মডিউল", appLabel: "অ্যাপ", compatibleReleasePending: "সামঞ্জস্যপূর্ণ রিলিজ এখনো পাওয়া যায়নি",
     language: 'ভাষা', steamvrLifecycle: 'SteamVR-এর সাথে চালু ও বন্ধ করুন', saveError: 'সেটিং সংরক্ষণ করা যায়নি', openError: 'লিংক খোলা যায়নি',
   },
   'pt-BR': {
@@ -118,6 +126,7 @@ const strings: Record<Language, Messages> = {
     touchpadNote: 'Posição e pressão sem botões virtuais', pressStrength: 'Pressionar', releaseAt: 'Soltar', hapticPower: 'Intensidade da vibração',
     force: 'FORÇA', upper: 'CIMA', lower: 'BAIXO', threshold: 'Limite',
     bundledAdb: 'ADB incluído', autoDiscovery: 'descoberta auto', moduleRequired: 'qptp-module deve estar ativo no Quest Pro',
+    updateRequired: "Atualize o módulo Quest Pro Touch Plus", magiskUpdateHint: "Você também pode tocar em Atualizar no módulo no Magisk", updateAvailable: "Atualização disponível", moduleLabel: "Módulo", appLabel: "Aplicativo", compatibleReleasePending: "Ainda não foi encontrada uma versão compatível",
     language: 'Idioma', steamvrLifecycle: 'Iniciar e fechar com o SteamVR', saveError: 'Não foi possível salvar a opção', openError: 'Não foi possível abrir o link',
   },
   id: {
@@ -129,6 +138,7 @@ const strings: Record<Language, Messages> = {
     touchpadNote: 'Posisi dan tekanan tanpa tombol virtual', pressStrength: 'Tekan', releaseAt: 'Lepas', hapticPower: 'Kekuatan getaran',
     force: 'TEKANAN', upper: 'ATAS', lower: 'BAWAH', threshold: 'Ambang',
     bundledAdb: 'ADB bawaan', autoDiscovery: 'temukan otomatis', moduleRequired: 'qptp-module harus berjalan di Quest Pro',
+    updateRequired: "Perbarui modul Quest Pro Touch Plus", magiskUpdateHint: "Anda juga dapat mengetuk Perbarui pada modul di Magisk", updateAvailable: "Pembaruan tersedia", moduleLabel: "Modul", appLabel: "Aplikasi", compatibleReleasePending: "Rilis yang kompatibel belum ditemukan",
     language: 'Bahasa', steamvrLifecycle: 'Mulai dan tutup bersama SteamVR', saveError: 'Pengaturan tidak dapat disimpan', openError: 'Tautan tidak dapat dibuka',
   },
   ja: {
@@ -140,6 +150,7 @@ const strings: Record<Language, Messages> = {
     touchpadNote: '仮想ボタンを使わず位置と圧力を表示', pressStrength: '押す', releaseAt: '離す', hapticPower: '振動の強さ',
     force: '圧力', upper: '上', lower: '下', threshold: 'しきい値',
     bundledAdb: '内蔵 ADB', autoDiscovery: '自動検出', moduleRequired: 'Quest Pro で qptp-module を起動してください',
+    updateRequired: "Quest Pro Touch Plus モジュールを更新", magiskUpdateHint: "Magisk のモジュールで「更新」を押すこともできます", updateAvailable: "更新があります", moduleLabel: "モジュール", appLabel: "アプリ", compatibleReleasePending: "互換性のあるリリースはまだ見つかりません",
     language: '言語', steamvrLifecycle: 'SteamVR と一緒に起動・終了', saveError: '設定を保存できませんでした', openError: 'リンクを開けませんでした',
   },
   de: {
@@ -151,6 +162,7 @@ const strings: Record<Language, Messages> = {
     touchpadNote: 'Position und Druck ohne virtuelle Tasten', pressStrength: 'Drücken', releaseAt: 'Loslassen', hapticPower: 'Vibrationsstärke',
     force: 'DRUCK', upper: 'OBEN', lower: 'UNTEN', threshold: 'Schwelle',
     bundledAdb: 'integriertes ADB', autoDiscovery: 'automatische Suche', moduleRequired: 'qptp-module muss auf Quest Pro laufen',
+    updateRequired: "Aktualisiere das Quest Pro Touch Plus Modul", magiskUpdateHint: "Du kannst auch in Magisk beim Modul auf Aktualisieren tippen", updateAvailable: "Update verfügbar", moduleLabel: "Modul", appLabel: "App", compatibleReleasePending: "Noch keine kompatible Version gefunden",
     language: 'Sprache', steamvrLifecycle: 'Mit SteamVR starten und beenden', saveError: 'Einstellung konnte nicht gespeichert werden', openError: 'Link konnte nicht geöffnet werden',
   },
 }

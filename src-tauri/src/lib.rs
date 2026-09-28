@@ -9,6 +9,8 @@ pub mod steamvr_install;
 const PORT: u16 = 27182;
 const DISCOVERY_PORT: u16 = 27183;
 const HAPTIC_DURATION_MS: u16 = 2;
+const MIN_MODULE_VERSION_CODE: u64 = 9; // QPR3 and QPV1 are required.
+const MIN_MODULE_VERSION: &str = "v3.3";
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -50,17 +52,18 @@ fn system_language()->&'static str{
 fn valid_threshold(value:f32)->bool {value.is_finite()&&(0.0..=1.0).contains(&value)}
 
 #[derive(Clone, Default, Serialize)]
-struct Sensor { x: u16, y: u16, force: f32 }
+#[serde(rename_all = "camelCase")]
+struct Sensor { x: u16, y: u16, force: f32, stylus: f32, trigger_proximity: f32, trigger_slide: f32 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Snapshot {
     phase: String, message: String, transport: String, endpoint: Option<String>,
-    protocol: Option<String>, samples: u64, left: Sensor, right: Sensor, status: Option<Value>,
+    protocol: Option<String>, module_version: Option<Value>, minimum_module_version: &'static str, module_update_required: bool, samples: u64, left: Sensor, right: Sensor, status: Option<Value>,
     input_mode: String, press_threshold: f32, release_threshold: f32, haptic_amplitude: f32, language: String, left_buttons: [bool;2], right_buttons: [bool;2],
     steamvr_connected: bool, steamvr_lifecycle: bool,
 }
 impl Default for Snapshot {
-    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"lan".into(), endpoint:None, protocol:None, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,release_threshold:0.20,haptic_amplitude:0.20,language:"ru".into(),left_buttons:[false;2],right_buttons:[false;2],steamvr_connected:false,steamvr_lifecycle:true } }
+    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"lan".into(), endpoint:None, protocol:None, module_version:None, minimum_module_version:MIN_MODULE_VERSION, module_update_required:false, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,release_threshold:0.20,haptic_amplitude:0.20,language:"ru".into(),left_buttons:[false;2],right_buttons:[false;2],steamvr_connected:false,steamvr_lifecycle:true } }
 }
 struct StreamState { snapshot: Mutex<Snapshot>, config_lock: Mutex<()>, generation: AtomicU64, adb_used: AtomicBool }
 type Shared = Arc<StreamState>;
@@ -165,7 +168,7 @@ fn read_exact_checked(stream:&mut TcpStream, bytes:&mut [u8], state:&Shared, gen
 }
 fn sensor(b:&[u8])->Sensor{
     // Module's Y axis is inverted relative to the pad; flip so 0 is the top.
-    Sensor{x:u16::from_le_bytes([b[0],b[1]]),y:255u16.saturating_sub(u16::from_le_bytes([b[2],b[3]])),force:f32::from_le_bytes(b[4..8].try_into().unwrap())}
+    Sensor{x:u16::from_le_bytes([b[0],b[1]]),y:255u16.saturating_sub(u16::from_le_bytes([b[2],b[3]])),force:f32::from_le_bytes(b[4..8].try_into().unwrap()),stylus:f32::from_le_bytes(b[8..12].try_into().unwrap()),trigger_proximity:f32::from_le_bytes(b[12..16].try_into().unwrap()),trigger_slide:f32::from_le_bytes(b[16..20].try_into().unwrap())}
 }
 fn button_step(previous:[bool;2], sensor:&Sensor, mode:&str, press_threshold:f32, release_threshold:f32)->[bool;2]{
     // Raw (0, 0) is no touch. The decoded Y axis is flipped, so idle is (0, 255).
@@ -194,6 +197,23 @@ fn read_frame(stream:&mut TcpStream, app:&AppHandle, state:&Shared, generation:u
         if state.generation.load(Ordering::SeqCst)!=generation{return Ok(())}
         read_exact_checked(stream,&mut header,state,generation)?;
         match &header {
+            b"QPV1"=>{
+                let mut size=[0u8;4];read_exact_checked(stream,&mut size,state,generation)?;
+                let size=u32::from_le_bytes(size) as usize;
+                if size>4096{return Err(io::Error::new(io::ErrorKind::InvalidData,"Слишком большой кадр версии"))}
+                let mut body=vec![0u8;size];read_exact_checked(stream,&mut body,state,generation)?;
+                let version:Value=serde_json::from_slice(&body).map_err(io::Error::other)?;
+                if state.generation.load(Ordering::SeqCst)!=generation {return Ok(())}
+                let code=version.get("versionCode").and_then(Value::as_u64)
+                    .ok_or_else(||io::Error::new(io::ErrorKind::InvalidData,"Не указан код версии модуля"))?;
+                let required=code<MIN_MODULE_VERSION_CODE;
+                publish(app,state,|s|{s.module_version=Some(version);s.module_update_required=required});
+                if required {return Err(io::Error::new(io::ErrorKind::InvalidData,"Требуется обновление модуля"))}
+            }
+            b"QPR2"=>{
+                publish(app,state,|s|s.module_update_required=true);
+                return Err(io::Error::new(io::ErrorKind::InvalidData,"Требуется обновление модуля"));
+            }
             b"QPA1"=>{
                 let mut body=[0u8;12];read_exact_checked(stream,&mut body,state,generation)?;
                 let request_id=u32::from_le_bytes(body[..4].try_into().unwrap());
@@ -206,16 +226,16 @@ fn read_frame(stream:&mut TcpStream, app:&AppHandle, state:&Shared, generation:u
                 let mut body=vec![0u8;size];read_exact_checked(stream,&mut body,state,generation)?;
                 let status:Value=serde_json::from_slice(&body).map_err(io::Error::other)?;
                 if state.generation.load(Ordering::SeqCst)!=generation {return Ok(())}
-                publish(app,state,|s|{s.status=Some(status);s.phase="connected".into();s.message="Поток сенсоров активен".into();s.protocol=Some("QPR2 / QPS1".into());if !controller_connected(s,"left"){s.left_buttons=[false;2]}if !controller_connected(s,"right"){s.right_buttons=[false;2]}});
+                publish(app,state,|s|{s.status=Some(status);s.phase="connected".into();s.message="Поток сенсоров активен".into();s.protocol=Some("QPR3 / QPS1".into());if !controller_connected(s,"left"){s.left_buttons=[false;2]}if !controller_connected(s,"right"){s.right_buttons=[false;2]}});
             }
-            b"QPR2"=>{
-                let mut body=[0u8;28];read_exact_checked(stream,&mut body,state,generation)?;
+            b"QPR3"=>{
+                let mut body=[0u8;52];read_exact_checked(stream,&mut body,state,generation)?;
                 if state.generation.load(Ordering::SeqCst)!=generation {return Ok(())}
-                let (left,right)=(sensor(&body[12..20]),sensor(&body[20..28]));
+                let (left,right)=(sensor(&body[12..32]),sensor(&body[32..52]));
                 let mut pulses=[false;2];let mut amplitude=0u8;
                 if let Ok(mut s)=state.snapshot.lock(){
                     let previous=(s.left_buttons,s.right_buttons);
-                    s.left=left;s.right=right;s.samples+=1;s.phase="connected".into();s.message="Поток сенсоров активен".into();s.protocol=Some("QPR2 / QPS1".into());
+                    s.left=left;s.right=right;s.samples+=1;s.phase="connected".into();s.message="Поток сенсоров активен".into();s.protocol=Some("QPR3 / QPS1".into());
                     s.left_buttons=if s.status.is_none()||controller_connected(&s,"left"){button_step(previous.0,&s.left,&s.input_mode,s.press_threshold,s.release_threshold)}else{[false;2]};
                     s.right_buttons=if s.status.is_none()||controller_connected(&s,"right"){button_step(previous.1,&s.right,&s.input_mode,s.press_threshold,s.release_threshold)}else{[false;2]};
                     s.steamvr_connected=extra_ipc::publish(&s);
@@ -239,25 +259,33 @@ fn worker(app:AppHandle,state:Shared,generation:u64,transport:String){
     let mut owned_forward:Option<PathBuf>=None;
     loop {
         if state.generation.load(Ordering::SeqCst)!=generation {break}
-        publish(&app,&state,|s|{s.phase="searching".into();s.message=if transport=="usb"{"Поиск Quest через ADB…".into()}else{"Поиск Quest в локальной сети…".into()};s.status=None;s.endpoint=None;s.protocol=None;s.left=Sensor::default();s.right=Sensor::default();s.left_buttons=[false;2];s.right_buttons=[false;2]});
+        let update_required=state.snapshot.lock().map(|s|s.module_update_required).unwrap_or(false);
+        if !update_required {publish(&app,&state,|s|{s.phase="searching".into();s.message=if transport=="usb"{"Поиск Quest через ADB…".into()}else{"Поиск Quest в локальной сети…".into()};s.status=None;s.endpoint=None;s.protocol=None;s.module_version=None;s.left=Sensor::default();s.right=Sensor::default();s.left_buttons=[false;2];s.right_buttons=[false;2]});}
         let endpoint=if transport=="usb"{
             match adb_forward(&app,&state){Ok((adb,owns))=>{if owns{owned_forward=Some(adb)};Ok(format!("127.0.0.1:{PORT}"))},Err(e)=>Err(e)}
         }else{discover().map_err(|e|e.to_string())};
         if state.generation.load(Ordering::SeqCst)!=generation {break}
         match endpoint {
             Ok(endpoint)=>{
-                publish(&app,&state,|s|{s.phase="connecting".into();s.message="Ожидание потока модуля…".into();s.endpoint=Some(endpoint.clone())});
+                if !update_required {publish(&app,&state,|s|{s.phase="connecting".into();s.message="Ожидание потока модуля…".into();s.endpoint=Some(endpoint.clone())});}
                 match endpoint.parse().ok().and_then(|addr|TcpStream::connect_timeout(&addr,Duration::from_secs(2)).ok()){
                     Some(mut stream)=>{
                         let _=stream.set_read_timeout(Some(Duration::from_millis(500)));
-                        if let Err(e)=read_frame(&mut stream,&app,&state,generation){if state.generation.load(Ordering::SeqCst)==generation{publish(&app,&state,|s|{s.phase="searching".into();s.message=format!("Соединение прервано: {e}. Повторная попытка…");s.status=None})}}
+                        if let Err(e)=read_frame(&mut stream,&app,&state,generation){if state.generation.load(Ordering::SeqCst)==generation{
+                            if state.snapshot.lock().map(|s|s.module_update_required).unwrap_or(false) {
+                                publish(&app,&state,|s|{s.phase="error".into();s.message=e.to_string();s.status=None});
+                            } else {
+                                publish(&app,&state,|s|{s.phase="searching".into();s.message=format!("Соединение прервано: {e}. Повторная попытка…");s.status=None})
+                            }
+                        }}
                     }
-                    None=>publish(&app,&state,|s|{s.phase="searching".into();s.message="Модуль пока не отвечает. Повторная попытка…".into()}),
+                    None=>if !update_required {publish(&app,&state,|s|{s.phase="searching".into();s.message="Модуль пока не отвечает. Повторная попытка…".into()})},
                 }
             }
-            Err(e)=>publish(&app,&state,|s|{s.phase="searching".into();s.message=format!("{e}. Повторная попытка…")}),
+            Err(e)=>if !update_required {publish(&app,&state,|s|{s.phase="searching".into();s.message=format!("{e}. Повторная попытка…")})},
         }
-        for _ in 0..10{if state.generation.load(Ordering::SeqCst)!=generation{break}thread::sleep(Duration::from_millis(100))}
+        let pause=if state.snapshot.lock().map(|s|s.module_update_required).unwrap_or(false){50}else{10};
+        for _ in 0..pause{if state.generation.load(Ordering::SeqCst)!=generation{break}thread::sleep(Duration::from_millis(100))}
     }
     if let Some(path)=owned_forward{
         let next_is_usb=state.snapshot.lock().map(|s|s.transport=="usb").unwrap_or(false);
@@ -379,8 +407,19 @@ fn watch_steamvr_lifecycle(app:AppHandle,state:Shared){
 }
 #[tauri::command]
 fn open_module_page()->Result<(),String>{
-    const URL:&str="https://github.com/Lateir/qptp-module";
-    let wide:Vec<u16>=URL.encode_utf16().chain(std::iter::once(0)).collect();
+    open_external_page("https://github.com/Lateir/qptp-module")
+}
+#[tauri::command]
+fn open_release_page(target:&str)->Result<(),String>{
+    let url=match target {
+        "module"=>"https://github.com/Lateir/qptp-module/releases/latest",
+        "app"=>"https://github.com/Lateir/qptp/releases/latest",
+        _=>return Err("Неизвестный тип обновления".into()),
+    };
+    open_external_page(url)
+}
+fn open_external_page(url:&str)->Result<(),String>{
+    let wide:Vec<u16>=url.encode_utf16().chain(std::iter::once(0)).collect();
     let result=unsafe{windows_sys::Win32::UI::Shell::ShellExecuteW(
         std::ptr::null_mut(),std::ptr::null(),wide.as_ptr(),std::ptr::null(),std::ptr::null(),1
     )};
@@ -448,7 +487,7 @@ pub fn run(){
             WindowEvent::CloseRequested{..}=>window.app_handle().exit(0),
             _=>{}
         })
-        .invoke_handler(tauri::generate_handler![get_stream_state,set_transport,set_input_mode,set_button_thresholds,set_haptic_amplitude,set_language,set_steamvr_lifecycle,open_module_page])
+        .invoke_handler(tauri::generate_handler![get_stream_state,set_transport,set_input_mode,set_button_thresholds,set_haptic_amplitude,set_language,set_steamvr_lifecycle,open_module_page,open_release_page])
         .build(tauri::generate_context!()).expect("tauri application error")
         .run(|app,event|match event{
             // Destroying the last window (tray mode) must not quit the app; explicit exit passes a code.
@@ -464,7 +503,7 @@ pub fn run(){
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn sample(y:u16,force:f32)->Sensor{Sensor{x:80,y,force}}
+    fn sample(y:u16,force:f32)->Sensor{Sensor{x:80,y,force,..Sensor::default()}}
     #[test]
     fn tray_shows_both_controller_batteries_on_one_line(){
         let snapshot=Snapshot{phase:"connected".into(),status:Some(serde_json::json!({
@@ -494,7 +533,7 @@ mod tests {
         assert_eq!(left,[true,false]);
         assert_eq!(button_step(left,&sample(200,0.35),"two_buttons",0.30,0.20),left);
         assert_eq!(button_step([false;2],&sample(128,0.35),"two_buttons",0.30,0.20),[false,true]);
-        assert_eq!(button_step(left,&Sensor{x:0,y:255,force:0.35},"two_buttons",0.30,0.20),[false;2]);
+        assert_eq!(button_step(left,&Sensor{x:0,y:255,force:0.35,..Sensor::default()},"two_buttons",0.30,0.20),[false;2]);
         assert_eq!(button_step(left,&sample(80,0.35),"touchpad",0.30,0.20),[false;2]);
     }
     #[test]

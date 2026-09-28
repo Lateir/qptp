@@ -7,7 +7,7 @@ A Windows app for viewing the additional touch sensors on Quest Pro Touch Pro co
 ## Requirements
 
 - Windows 10/11 with WebView2.
-- A Quest Pro with [qptp-module](https://github.com/Lateir/qptp-module) installed and running. The module provides the QPR2/QPS1 stream.
+- A Quest Pro with [qptp-module](https://github.com/Lateir/qptp-module) installed and running. The module provides the QPV1/QPR3/QPS1 stream.
 - USB: ADB debugging authorized on the Quest. ADB and its DLLs are bundled with the app.
 - LAN: the computer and Quest on the same local network, with access to UDP port 27183 and TCP port 27182. The app discovers the Quest automatically by UDP broadcast.
 
@@ -35,7 +35,9 @@ Close SteamVR before installing, updating, or uninstalling QPTP. SteamVR keeps t
 
 ## Behavior
 
-The app connects automatically on startup and retries if the Quest is unavailable or the stream disconnects. LAN is selected on the first launch. Choose USB or LAN on the **Settings** tab; the choice is saved. USB uses the bundled ADB and creates a `tcp:27182` port forward. LAN broadcasts the `QPD1` discovery packet to UDP port 27183, then connects to the discovered address. `QPS1` supplies controller connection, battery, and tracking data; `QPR2` updates X, Y, and force. Y = 0 is the top of the touchpad.
+The app connects automatically on startup and retries if the Quest is unavailable or the stream disconnects. LAN is selected on the first launch. Choose USB or LAN on the **Settings** tab; the choice is saved. USB uses the bundled ADB and creates a `tcp:27182` port forward. LAN broadcasts the `QPD1` discovery packet to UDP port 27183, then connects to the discovered address. `QPV1` supplies the installed module version, `QPS1` supplies controller status, and `QPR3` updates X, Y, force, stylus, trigger proximity, and trigger slide for both controllers. Y = 0 is the top of the touchpad. The minimum supported module `versionCode` is 9 (v3.3), required for QPR3. A lower code or a legacy `QPR2` stream shows a required update card; the app retries so it can reconnect after the module is updated.
+
+While the window is open, the app checks the latest published GitHub Releases for `Lateir/qptp` and `Lateir/qptp-module` on launch and once per hour. When a newer release is available, a separate green arrow beside the tab menu opens an updates view with links to the relevant release pages. A failed or offline check leaves the current status unchanged. The minimum compatible module version is a separate application constant; a release announcement alone does not make an update mandatory.
 
 Minimizing destroys the window to release WebView2 memory while the app continues running in the system tray. Left-click the tray icon to reopen the window. Right-click to see both controllers on one row with their battery percentages (check mark = connected, empty circle = disconnected), followed by **Quit**. Closing the window with its X button exits the app.
 
