@@ -4,6 +4,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { version } from '../package.json'
 import ModePanel from '@/components/ModePanel.vue'
+import SensorsPanel from '@/components/SensorsPanel.vue'
 import TouchPad from '@/components/TouchPad.vue'
 import { detectLanguage, isLanguage, languages, translate, type Language, type TranslationKey } from '@/i18n'
 type Mode = 'usb' | 'lan'
@@ -12,13 +13,13 @@ type Side = { x:number; y:number; force:number; stylus:number; triggerProximity:
 type Snapshot = { phase:string; message:string; transport:Mode; endpoint?:string; protocol?:string; moduleVersion?:{version:string;versionCode:number}; minimumModuleVersion:string; moduleUpdateRequired:boolean; samples:number; left:Side; right:Side; status?:Record<string,unknown>; inputMode:InputMode; pressThreshold:number; releaseThreshold:number; hapticAmplitude:number; language:Language; leftButtons:[boolean,boolean]; rightButtons:[boolean,boolean]; steamvrConnected:boolean; steamvrLifecycle:boolean }
 const zero={x:0,y:0,force:0,stylus:0,triggerProximity:0,triggerSlide:0}
 const snap=ref<Snapshot>({phase:'searching',message:'Поиск устройства…',transport:'lan',minimumModuleVersion:'v3.3',moduleUpdateRequired:false,samples:0,left:zero,right:zero,inputMode:'touchpad',pressThreshold:0.30,releaseThreshold:0.20,hapticAmplitude:0.20,language:'ru',leftButtons:[false,false],rightButtons:[false,false],steamvrConnected:false,steamvrLifecycle:true})
-const mode=ref<Mode>('lan'),tab=ref<'mode'|'status'|'settings'|'updates'>('status'),busy=ref(false)
+const mode=ref<Mode>('lan'),tab=ref<'sensors'|'mode'|'status'|'settings'|'updates'>('status'),busy=ref(false)
 const inputBusy=ref(false),inputError=ref('')
 const linkError=ref(''),settingsError=ref(''),languageBusy=ref(false),lifecycleBusy=ref(false)
 const storedLanguage=localStorage.getItem('qptp-language')||''
 const language=ref<Language>(isLanguage(storedLanguage)?storedLanguage:detectLanguage(navigator.languages?.length?navigator.languages:[navigator.language]))
 const t=(key:TranslationKey)=>translate(language.value,key)
-const tabs=[{id:'mode',label:'tabMode'},{id:'status',label:'tabStatus'},{id:'settings',label:'tabSettings'}] as const
+const tabs=[{id:'sensors',label:'tabSensors'},{id:'mode',label:'tabMode'},{id:'status',label:'tabStatus'},{id:'settings',label:'tabSettings'}] as const
 let unlisten:UnlistenFn|undefined
 let updateTimer:ReturnType<typeof setInterval>|undefined
 const latestApp=ref<string>(),latestModule=ref<string>()
@@ -52,8 +53,8 @@ onMounted(async()=>{void checkReleases();updateTimer=setInterval(()=>void checkR
 onUnmounted(()=>{unlisten?.();if(updateTimer)clearInterval(updateTimer)})
 </script>
 <template>
-<div class="app">
-  <TouchPad v-bind="snap.left" :live="online('left')" :mode="snap.inputMode" :buttons="snap.leftButtons" :threshold="snap.pressThreshold" :release-threshold="snap.releaseThreshold" :language="language"/>
+<div class="app" :class="{'sensors-active':tab==='sensors'}">
+  <TouchPad v-if="tab!=='sensors'" v-bind="snap.left" :live="online('left')" :mode="snap.inputMode" :buttons="snap.leftButtons" :threshold="snap.pressThreshold" :release-threshold="snap.releaseThreshold" :language="language"/>
   <main class="center">
     <h1 v-if="tab!=='settings'">Quest Pro <em>touch</em> Plus</h1>
     <div class="view">
@@ -74,6 +75,7 @@ onUnmounted(()=>{unlisten?.();if(updateTimer)clearInterval(updateTimer)})
           </div>
         </div>
       </template>
+      <SensorsPanel v-else-if="tab==='sensors'" :left="snap.left" :right="snap.right" :left-online="online('left')" :right-online="online('right')" :language="language"/>
       <template v-else-if="tab==='mode'">
         <ModePanel :mode="snap.inputMode" :press-threshold="snap.pressThreshold" :release-threshold="snap.releaseThreshold" :haptic-amplitude="snap.hapticAmplitude" :busy="inputBusy" :language="language" @select="selectInputMode" @thresholds="saveButtonThresholds" @amplitude="saveHapticAmplitude"/>
         <p v-if="inputError" class="mode-error" role="alert">{{t('saveError')}}</p>
@@ -100,8 +102,8 @@ onUnmounted(()=>{unlisten?.();if(updateTimer)clearInterval(updateTimer)})
           <span>github.com/Lateir/qptp-module ↗</span>
         </button>
         <p v-if="linkError||settingsError" class="link-error" role="alert">{{linkError?t('openError'):settingsError}}</p>
-        <p v-if="snap.moduleVersion" class="meta credit">Module {{snap.moduleVersion.version}} ({{snap.moduleVersion.versionCode}})</p>
-        <p class="meta credit">Lateir · v{{version}}</p>
+        <p class="meta credit version-line">QPTP v{{version}}<template v-if="snap.moduleVersion"> · {{t('moduleLabel')}} {{snap.moduleVersion.version}}</template></p>
+        <p class="meta credit">by lateir with ❤️</p>
       </div>
     </div>
     <nav class="navigation">
@@ -109,6 +111,6 @@ onUnmounted(()=>{unlisten?.();if(updateTimer)clearInterval(updateTimer)})
       <button v-if="availableUpdates" type="button" class="update-shortcut" :class="{active:tab==='updates'}" :aria-label="t('updateAvailable')" :title="t('updateAvailable')" @click="tab='updates'">↑</button>
     </nav>
   </main>
-  <TouchPad v-bind="snap.right" :live="online('right')" :mode="snap.inputMode" :buttons="snap.rightButtons" :threshold="snap.pressThreshold" :release-threshold="snap.releaseThreshold" :language="language"/>
+  <TouchPad v-if="tab!=='sensors'" v-bind="snap.right" :live="online('right')" :mode="snap.inputMode" :buttons="snap.rightButtons" :threshold="snap.pressThreshold" :release-threshold="snap.releaseThreshold" :language="language"/>
 </div>
 </template>

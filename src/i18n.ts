@@ -16,7 +16,8 @@ export const languages = [
 export type Language = typeof languages[number]['code']
 
 const ru = {
-  tabMode: 'Режим', tabStatus: 'Статус', tabSettings: 'Настройки',
+  tabSensors: 'Датчики', tabMode: 'Тачпады', tabStatus: 'Статус', tabSettings: 'Настройки',
+    stylusSensor: 'Стилус', triggerProximitySensor: 'Палец у триггера', triggerSlideSensor: 'Сдвиг по триггеру',
   searching: 'поиск', connecting: 'подключение', connected: 'подключено', error: 'ошибка',
   searchingHint: 'Поиск устройства…', connectingHint: 'Ожидание потока модуля…', connectedHint: 'Поток сенсоров активен', errorHint: 'Ошибка подключения',
   left: 'Левый', right: 'Правый', online: 'Подключено', offline: 'Не подключено', battery: 'Батарея',
@@ -34,7 +35,8 @@ type Messages = Record<TranslationKey, string>
 const strings: Record<Language, Messages> = {
   ru,
   en: {
-    tabMode: 'Mode', tabStatus: 'Status', tabSettings: 'Settings',
+    tabSensors: 'Sensors', tabMode: 'Touchpads', tabStatus: 'Status', tabSettings: 'Settings',
+    stylusSensor: 'Stylus', triggerProximitySensor: 'Finger near trigger', triggerSlideSensor: 'Trigger surface slide',
     searching: 'searching', connecting: 'connecting', connected: 'connected', error: 'error',
     searchingHint: 'Searching for the device…', connectingHint: 'Waiting for the module stream…', connectedHint: 'Sensor stream active', errorHint: 'Connection error',
     left: 'Left', right: 'Right', online: 'Connected', offline: 'Disconnected', battery: 'Battery',
@@ -46,7 +48,8 @@ const strings: Record<Language, Messages> = {
     language: 'Language', steamvrLifecycle: 'Start and exit with SteamVR', saveError: 'Could not save the setting', openError: 'Could not open the link',
   },
   'zh-CN': {
-    tabMode: '模式', tabStatus: '状态', tabSettings: '设置',
+    tabSensors: '传感器', tabMode: '触控板', tabStatus: '状态', tabSettings: '设置',
+    stylusSensor: '触控笔', triggerProximitySensor: '扳机附近的手指', triggerSlideSensor: '扳机表面滑动',
     searching: '搜索中', connecting: '连接中', connected: '已连接', error: '错误',
     searchingHint: '正在搜索设备…', connectingHint: '等待模块数据流…', connectedHint: '传感器数据流已启用', errorHint: '连接错误',
     left: '左手', right: '右手', online: '已连接', offline: '未连接', battery: '电量',
@@ -58,7 +61,8 @@ const strings: Record<Language, Messages> = {
     language: '语言', steamvrLifecycle: '随 SteamVR 启动和关闭', saveError: '无法保存设置', openError: '无法打开链接',
   },
   hi: {
-    tabMode: 'मोड', tabStatus: 'स्थिति', tabSettings: 'सेटिंग्स',
+    tabSensors: 'सेंसर', tabMode: 'टचपैड', tabStatus: 'स्थिति', tabSettings: 'सेटिंग्स',
+    stylusSensor: 'स्टाइलस', triggerProximitySensor: 'ट्रिगर के पास उंगली', triggerSlideSensor: 'ट्रिगर पर उंगली सरकाना',
     searching: 'खोज जारी', connecting: 'कनेक्ट हो रहा', connected: 'कनेक्टेड', error: 'त्रुटि',
     searchingHint: 'डिवाइस खोजा जा रहा है…', connectingHint: 'मॉड्यूल स्ट्रीम की प्रतीक्षा…', connectedHint: 'सेंसर स्ट्रीम सक्रिय है', errorHint: 'कनेक्शन त्रुटि',
     left: 'बायाँ', right: 'दायाँ', online: 'कनेक्टेड', offline: 'कनेक्ट नहीं है', battery: 'बैटरी',
@@ -70,7 +74,8 @@ const strings: Record<Language, Messages> = {
     language: 'भाषा', steamvrLifecycle: 'SteamVR के साथ शुरू और बंद करें', saveError: 'सेटिंग सहेजी नहीं जा सकी', openError: 'लिंक नहीं खुल सका',
   },
   es: {
-    tabMode: 'Modo', tabStatus: 'Estado', tabSettings: 'Ajustes',
+    tabSensors: 'Sensores', tabMode: 'Paneles táctiles', tabStatus: 'Estado', tabSettings: 'Ajustes',
+    stylusSensor: 'Lápiz', triggerProximitySensor: 'Dedo cerca del gatillo', triggerSlideSensor: 'Deslizamiento en el gatillo',
     searching: 'buscando', connecting: 'conectando', connected: 'conectado', error: 'error',
     searchingHint: 'Buscando el dispositivo…', connectingHint: 'Esperando datos del módulo…', connectedHint: 'Flujo de sensores activo', errorHint: 'Error de conexión',
     left: 'Izquierdo', right: 'Derecho', online: 'Conectado', offline: 'Desconectado', battery: 'Batería',
@@ -82,7 +87,8 @@ const strings: Record<Language, Messages> = {
     language: 'Idioma', steamvrLifecycle: 'Iniciar y cerrar con SteamVR', saveError: 'No se pudo guardar el ajuste', openError: 'No se pudo abrir el enlace',
   },
   ar: {
-    tabMode: 'الوضع', tabStatus: 'الحالة', tabSettings: 'الإعدادات',
+    tabSensors: 'المستشعرات', tabMode: 'لوحات اللمس', tabStatus: 'الحالة', tabSettings: 'الإعدادات',
+    stylusSensor: 'القلم', triggerProximitySensor: 'الإصبع قرب الزناد', triggerSlideSensor: 'انزلاق الإصبع على الزناد',
     searching: 'جارٍ البحث', connecting: 'جارٍ الاتصال', connected: 'متصل', error: 'خطأ',
     searchingHint: 'جارٍ البحث عن الجهاز…', connectingHint: 'بانتظار بث الوحدة…', connectedHint: 'بث المستشعرات نشط', errorHint: 'خطأ في الاتصال',
     left: 'الأيسر', right: 'الأيمن', online: 'متصل', offline: 'غير متصل', battery: 'البطارية',
@@ -94,7 +100,8 @@ const strings: Record<Language, Messages> = {
     language: 'اللغة', steamvrLifecycle: 'التشغيل والإغلاق مع SteamVR', saveError: 'تعذر حفظ الإعداد', openError: 'تعذر فتح الرابط',
   },
   fr: {
-    tabMode: 'Mode', tabStatus: 'État', tabSettings: 'Paramètres',
+    tabSensors: 'Capteurs', tabMode: 'Pavés tactiles', tabStatus: 'État', tabSettings: 'Paramètres',
+    stylusSensor: 'Stylet', triggerProximitySensor: 'Doigt près de la gâchette', triggerSlideSensor: 'Glissement sur la gâchette',
     searching: 'recherche', connecting: 'connexion', connected: 'connecté', error: 'erreur',
     searchingHint: 'Recherche de l’appareil…', connectingHint: 'Attente du flux du module…', connectedHint: 'Flux des capteurs actif', errorHint: 'Erreur de connexion',
     left: 'Gauche', right: 'Droit', online: 'Connecté', offline: 'Déconnecté', battery: 'Batterie',
@@ -106,7 +113,8 @@ const strings: Record<Language, Messages> = {
     language: 'Langue', steamvrLifecycle: 'Démarrer et fermer avec SteamVR', saveError: 'Impossible d’enregistrer le réglage', openError: 'Impossible d’ouvrir le lien',
   },
   bn: {
-    tabMode: 'মোড', tabStatus: 'অবস্থা', tabSettings: 'সেটিংস',
+    tabSensors: 'সেন্সর', tabMode: 'টাচপ্যাড', tabStatus: 'অবস্থা', tabSettings: 'সেটিংস',
+    stylusSensor: 'স্টাইলাস', triggerProximitySensor: 'ট্রিগারের কাছে আঙুল', triggerSlideSensor: 'ট্রিগারে আঙুল সরানো',
     searching: 'খোঁজা হচ্ছে', connecting: 'সংযোগ হচ্ছে', connected: 'সংযুক্ত', error: 'ত্রুটি',
     searchingHint: 'ডিভাইস খোঁজা হচ্ছে…', connectingHint: 'মডিউলের স্ট্রিমের অপেক্ষায়…', connectedHint: 'সেন্সর স্ট্রিম চালু আছে', errorHint: 'সংযোগের ত্রুটি',
     left: 'বাম', right: 'ডান', online: 'সংযুক্ত', offline: 'সংযুক্ত নয়', battery: 'ব্যাটারি',
@@ -118,7 +126,8 @@ const strings: Record<Language, Messages> = {
     language: 'ভাষা', steamvrLifecycle: 'SteamVR-এর সাথে চালু ও বন্ধ করুন', saveError: 'সেটিং সংরক্ষণ করা যায়নি', openError: 'লিংক খোলা যায়নি',
   },
   'pt-BR': {
-    tabMode: 'Modo', tabStatus: 'Status', tabSettings: 'Configurações',
+    tabSensors: 'Sensores', tabMode: 'Touchpads', tabStatus: 'Status', tabSettings: 'Configurações',
+    stylusSensor: 'Caneta', triggerProximitySensor: 'Dedo perto do gatilho', triggerSlideSensor: 'Deslize no gatilho',
     searching: 'buscando', connecting: 'conectando', connected: 'conectado', error: 'erro',
     searchingHint: 'Buscando o dispositivo…', connectingHint: 'Aguardando o fluxo do módulo…', connectedHint: 'Fluxo dos sensores ativo', errorHint: 'Erro de conexão',
     left: 'Esquerdo', right: 'Direito', online: 'Conectado', offline: 'Desconectado', battery: 'Bateria',
@@ -130,7 +139,8 @@ const strings: Record<Language, Messages> = {
     language: 'Idioma', steamvrLifecycle: 'Iniciar e fechar com o SteamVR', saveError: 'Não foi possível salvar a opção', openError: 'Não foi possível abrir o link',
   },
   id: {
-    tabMode: 'Mode', tabStatus: 'Status', tabSettings: 'Pengaturan',
+    tabSensors: 'Sensor', tabMode: 'Panel sentuh', tabStatus: 'Status', tabSettings: 'Pengaturan',
+    stylusSensor: 'Stylus', triggerProximitySensor: 'Jari dekat pemicu', triggerSlideSensor: 'Geser di permukaan pemicu',
     searching: 'mencari', connecting: 'menghubungkan', connected: 'terhubung', error: 'galat',
     searchingHint: 'Mencari perangkat…', connectingHint: 'Menunggu aliran modul…', connectedHint: 'Aliran sensor aktif', errorHint: 'Kesalahan koneksi',
     left: 'Kiri', right: 'Kanan', online: 'Terhubung', offline: 'Belum terhubung', battery: 'Baterai',
@@ -142,7 +152,8 @@ const strings: Record<Language, Messages> = {
     language: 'Bahasa', steamvrLifecycle: 'Mulai dan tutup bersama SteamVR', saveError: 'Pengaturan tidak dapat disimpan', openError: 'Tautan tidak dapat dibuka',
   },
   ja: {
-    tabMode: 'モード', tabStatus: '状態', tabSettings: '設定',
+    tabSensors: 'センサー', tabMode: 'タッチパッド', tabStatus: '状態', tabSettings: '設定',
+    stylusSensor: 'スタイラス', triggerProximitySensor: 'トリガー付近の指', triggerSlideSensor: 'トリガー表面のスライド',
     searching: '検索中', connecting: '接続中', connected: '接続済み', error: 'エラー',
     searchingHint: 'デバイスを検索中…', connectingHint: 'モジュールのデータを待機中…', connectedHint: 'センサーデータを受信中', errorHint: '接続エラー',
     left: '左', right: '右', online: '接続済み', offline: '未接続', battery: 'バッテリー',
@@ -154,7 +165,8 @@ const strings: Record<Language, Messages> = {
     language: '言語', steamvrLifecycle: 'SteamVR と一緒に起動・終了', saveError: '設定を保存できませんでした', openError: 'リンクを開けませんでした',
   },
   de: {
-    tabMode: 'Modus', tabStatus: 'Status', tabSettings: 'Einstellungen',
+    tabSensors: 'Sensoren', tabMode: 'Touchpads', tabStatus: 'Status', tabSettings: 'Einstellungen',
+    stylusSensor: 'Stylus', triggerProximitySensor: 'Finger am Trigger', triggerSlideSensor: 'Wischen auf dem Trigger',
     searching: 'Suche läuft', connecting: 'verbinde', connected: 'verbunden', error: 'Fehler',
     searchingHint: 'Gerät wird gesucht…', connectingHint: 'Warte auf den Modulstream…', connectedHint: 'Sensorstream aktiv', errorHint: 'Verbindungsfehler',
     left: 'Links', right: 'Rechts', online: 'Verbunden', offline: 'Nicht verbunden', battery: 'Akku',
