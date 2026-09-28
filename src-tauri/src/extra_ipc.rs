@@ -1,6 +1,6 @@
 #[cfg(windows)]
 mod windows {
-    use crate::{controller_connected, Snapshot};
+    use crate::{controller_connected, tray_controller, Snapshot};
     use std::{net::UdpSocket, sync::{Mutex, OnceLock}, time::{Duration, Instant}};
 
     struct Link { socket: UdpSocket, last_ack: Option<Instant> }
@@ -33,6 +33,13 @@ mod windows {
         output.push(format!("{side}_single_button={}", u8::from(single)));
         output.push(format!("{side}_double_button_1={}", u8::from(double_first)));
         output.push(format!("{side}_double_button_2={}", u8::from(double_second)));
+        for (name, value) in [("stylus", sensor.stylus), ("trigger_proximity", sensor.trigger_proximity), ("trigger_slide", sensor.trigger_slide)] {
+            let value = if live && value.is_finite() { value.clamp(0.0, 1.0) } else { 0.0 };
+            output.push(format!("{side}_{name}={value:.5}"));
+        }
+        let battery = tray_controller(snapshot, side).battery;
+        output.push(format!("{side}_battery_valid={}", u8::from(battery.is_some())));
+        output.push(format!("{side}_battery={:.5}", battery.unwrap_or(0) as f32 / 100.0));
     }
 
     pub(super) fn publish(snapshot: &Snapshot) -> bool {
@@ -45,7 +52,7 @@ mod windows {
             });
         }
         let Some(link) = link.as_mut() else { return false };
-        let mut fields = Vec::with_capacity(14);
+        let mut fields = Vec::with_capacity(24);
         lines(snapshot, "left", &mut fields);
         lines(snapshot, "right", &mut fields);
         let _ = link.socket.send_to(fields.join("\n").as_bytes(), "127.0.0.1:39571");
@@ -92,6 +99,27 @@ mod windows {
             lines(&snapshot, "left", &mut fields);
             assert!(fields.iter().any(|s| s == "left_single_button=0"));
             assert!(fields.iter().any(|s| s == "left_pad_touch=0"));
+        }
+        #[test]
+        fn analog_inputs_and_battery_follow_the_correct_side() {
+            let mut snapshot = Snapshot::default();
+            snapshot.phase = "connected".into();
+            snapshot.status = Some(serde_json::json!({"controllers": {
+                "left": {"connected": true, "battery_percent": 78},
+                "right": {"connected": false, "battery_percent": 42}
+            }}));
+            snapshot.left.stylus = 0.25;
+            snapshot.left.trigger_proximity = 0.5;
+            snapshot.left.trigger_slide = 0.75;
+            let mut left = Vec::new();
+            let mut right = Vec::new();
+            lines(&snapshot, "left", &mut left);
+            lines(&snapshot, "right", &mut right);
+            for expected in ["left_stylus=0.25000", "left_trigger_proximity=0.50000", "left_trigger_slide=0.75000", "left_battery_valid=1", "left_battery=0.78000"] {
+                assert!(left.iter().any(|field| field == expected), "missing {expected}");
+            }
+            assert!(right.iter().any(|field| field == "right_stylus=0.00000"));
+            assert!(right.iter().any(|field| field == "right_battery_valid=0"));
         }
     }
 }

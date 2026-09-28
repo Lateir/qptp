@@ -15,6 +15,12 @@
     "/input/left_double_button_2": { "type": "button", "click": true, "binding_image_point": [75, 125], "order": 5 },
     "/input/right_single_button": { "type": "button", "click": true, "binding_image_point": [145, 125], "order": 6 },
     "/input/right_double_button_1": { "type": "button", "click": true, "binding_image_point": [170, 125], "order": 7 },
-    "/input/right_double_button_2": { "type": "button", "click": true, "binding_image_point": [195, 125], "order": 8 }
+    "/input/right_double_button_2": { "type": "button", "click": true, "binding_image_point": [195, 125], "order": 8 },
+    "/input/left_stylus": { "type": "trigger", "value": true, "binding_image_point": [100, 80], "order": 9 },
+    "/input/left_trigger_proximity": { "type": "trigger", "value": true, "binding_image_point": [100, 105], "order": 10 },
+    "/input/left_trigger_slide": { "type": "trigger", "value": true, "binding_image_point": [100, 130], "order": 11 },
+    "/input/right_stylus": { "type": "trigger", "value": true, "binding_image_point": [120, 80], "order": 12 },
+    "/input/right_trigger_proximity": { "type": "trigger", "value": true, "binding_image_point": [120, 105], "order": 13 },
+    "/input/right_trigger_slide": { "type": "trigger", "value": true, "binding_image_point": [120, 130], "order": 14 }
   }
 }

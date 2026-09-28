@@ -1,0 +1,12 @@
+{
+  "jsonid": "input_profile",
+  "controller_type": "qptp_battery",
+  "device_class": "TrackedDeviceClass_Controller",
+  "resource_root": "qptp",
+  "driver_name": "qptp",
+  "input_bindingui_mode": "single_device",
+  "input_bindingui_right": { "image": "{qptp}/icons/qptp.svg" },
+  "input_source": {
+    "/pose/raw": { "type": "pose", "order": 0 }
+  }
+}

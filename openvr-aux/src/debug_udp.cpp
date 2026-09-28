@@ -69,6 +69,16 @@ bool DebugUdpInputSource::Poll(InputState& state) {
                     else if (key == "right_single_button") state.right.single_button = on;
                     else if (key == "right_double_button_1") state.right.double_button_1 = on;
                     else if (key == "right_double_button_2") state.right.double_button_2 = on;
+                    else if (key == "left_stylus") state.left.stylus = one;
+                    else if (key == "right_stylus") state.right.stylus = one;
+                    else if (key == "left_trigger_proximity") state.left.trigger_proximity = one;
+                    else if (key == "right_trigger_proximity") state.right.trigger_proximity = one;
+                    else if (key == "left_trigger_slide") state.left.trigger_slide = one;
+                    else if (key == "right_trigger_slide") state.right.trigger_slide = one;
+                    else if (key == "left_battery") { state.left.battery = one; state.left.battery_valid = true; }
+                    else if (key == "right_battery") { state.right.battery = one; state.right.battery_valid = true; }
+                    else if (key == "left_battery_valid") state.left.battery_valid = on;
+                    else if (key == "right_battery_valid") state.right.battery_valid = on;
                 }
             }
             if (end == std::string::npos) break;

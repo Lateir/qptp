@@ -17,7 +17,8 @@ fn driver_dir() -> Result<PathBuf, String> {
     let dir = exe.parent().ok_or("Application directory is missing")?.join("driver_qptp");
     if !dir.join("driver.vrdrivermanifest").is_file() ||
         !dir.join("bin/win64/driver_qptp.dll").is_file() ||
-        !dir.join("resources/input/qptp_profile.json").is_file() {
+        !dir.join("resources/input/qptp_profile.json").is_file() ||
+        !dir.join("resources/input/qptp_battery_profile.json").is_file() {
         return Err(format!("Incomplete SteamVR driver package: {}", dir.display()));
     }
     Ok(dir)
