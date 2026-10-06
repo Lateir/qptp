@@ -9,7 +9,7 @@ A Windows app for viewing the additional touch sensors on Quest Pro Touch Pro co
 - Windows 10/11 with WebView2.
 - A Quest Pro with [qptp-module](https://github.com/Lateir/qptp-module) installed and running. The module provides the QPV1/QPR3/QPS1 stream.
 - USB: ADB debugging authorized on the Quest. ADB and its DLLs are bundled with the app.
-- LAN: the computer and Quest on the same local network, with access to UDP port 27183 and TCP port 27182. The app discovers the Quest automatically by UDP broadcast.
+- LAN: the computer and Quest on the same local network, with access to UDP port 27183 and TCP port 27182. The app discovers the Quest automatically by UDP broadcast and parallel direct UDP probes.
 
 ## Run for development
 
@@ -35,7 +35,7 @@ Close SteamVR before installing, updating, or uninstalling QPTP. SteamVR keeps t
 
 ## Behavior
 
-The app connects automatically on startup and retries if the Quest is unavailable or the stream disconnects. LAN is selected on the first launch. Choose USB or LAN on the **Settings** tab; the choice is saved. USB uses the bundled ADB and creates a `tcp:27182` port forward. LAN broadcasts the `QPD1` discovery packet to UDP port 27183, then connects to the discovered address. `QPV1` supplies the installed module version, `QPS1` supplies controller status, and `QPR3` updates X, Y, force, stylus, trigger proximity, and trigger slide for both controllers. Y = 0 is the top of the touchpad. The minimum supported module `versionCode` is 9 (v3.3), required for QPR3. A lower code or a legacy `QPR2` stream shows a required update card; the app retries so it can reconnect after the module is updated.
+The app connects automatically on startup and retries if the Quest is unavailable or the stream disconnects. LAN is selected on the first launch. Choose USB or LAN on the **Settings** tab; the choice is saved. USB uses the bundled ADB and creates a `tcp:27182` port forward. LAN sends the `QPD1` discovery packet to UDP port 27183 using broadcast every 700 ms and parallel direct probes in batches of 32 per 25 ms on active IPv4 subnets. Subnets larger than /24 are limited to the local /24 for direct probes. Each search lasts up to 3 seconds and repeats after a short pause until the headset responds, including when it is powered on later. The app then connects to the discovered address. `QPV1` supplies the installed module version, `QPS1` supplies controller status, and `QPR3` updates X, Y, force, stylus, trigger proximity, and trigger slide for both controllers. Y = 0 is the top of the touchpad. The minimum supported module `versionCode` is 9 (v3.3), required for QPR3. A lower code or a legacy `QPR2` stream shows a required update card; the app retries so it can reconnect after the module is updated.
 
 While the window is open, the app checks the latest published GitHub Releases for `Lateir/qptp` and `Lateir/qptp-module` on launch and once per hour. When a newer release is available, a separate green arrow beside the tab menu opens an updates view with links to the relevant release pages. A failed or offline check leaves the current status unchanged. The minimum compatible module version is a separate application constant; a release announcement alone does not make an update mandatory.
 

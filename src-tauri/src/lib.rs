@@ -1,13 +1,14 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{io::{self, Read, Write}, net::{TcpStream, UdpSocket}, path::{Path, PathBuf}, process::Command, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc, Mutex}, thread, time::{Duration, Instant}};
+use std::{io::{self, Read, Write}, net::{TcpStream}, path::{Path, PathBuf}, process::Command, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc, Mutex}, thread, time::{Duration, Instant}};
 use tauri::{menu::{Menu, MenuItem, PredefinedMenuItem}, tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}, AppHandle, Emitter, Manager, RunEvent, State, WindowEvent, Wry};
 mod extra_ipc;
+mod discovery;
 #[cfg(windows)]
 pub mod steamvr_install;
 
 const PORT: u16 = 27182;
-const DISCOVERY_PORT: u16 = 27183;
+
 const HAPTIC_DURATION_MS: u16 = 2;
 const MIN_MODULE_VERSION_CODE: u64 = 9; // QPR3 and QPV1 are required.
 const MIN_MODULE_VERSION: &str = "v3.3";
@@ -137,22 +138,6 @@ fn adb_forward(app:&AppHandle,state:&Shared)->Result<(PathBuf,bool),String>{
     }){return Ok((path,false))}
     Err(format!("Не удалось настроить USB: {}",String::from_utf8_lossy(&output.stderr).trim()))
 }
-fn discover()->io::Result<String>{
-    let socket=UdpSocket::bind("0.0.0.0:0")?;
-    socket.set_broadcast(true)?;socket.set_read_timeout(Some(Duration::from_millis(250)))?;
-    let start=Instant::now();let mut next=Instant::now();
-    let mut packet=[0u8;64];
-    while start.elapsed()<Duration::from_secs(3){
-        if Instant::now()>=next {let _=socket.send_to(b"QPD1",("255.255.255.255",DISCOVERY_PORT));next=Instant::now()+Duration::from_millis(700)}
-        if let Ok((n,peer))=socket.recv_from(&mut packet) {
-            if n==8 && &packet[..4]==b"QPO1" && packet[6..8]==[1,0] {
-                let port=u16::from_le_bytes([packet[4],packet[5]]);
-                if port>=1024 {return Ok(format!("{}:{port}",peer.ip()))}
-            }
-        }
-    }
-    Err(io::Error::new(io::ErrorKind::NotFound,"Quest не найден в локальной сети"))
-}
 fn read_exact_checked(stream:&mut TcpStream, bytes:&mut [u8], state:&Shared, generation:u64)->io::Result<()> {
     let mut offset=0;
     while offset<bytes.len() {
@@ -263,7 +248,7 @@ fn worker(app:AppHandle,state:Shared,generation:u64,transport:String){
         if !update_required {publish(&app,&state,|s|{s.phase="searching".into();s.message=if transport=="usb"{"Поиск Quest через ADB…".into()}else{"Поиск Quest в локальной сети…".into()};s.status=None;s.endpoint=None;s.protocol=None;s.module_version=None;s.left=Sensor::default();s.right=Sensor::default();s.left_buttons=[false;2];s.right_buttons=[false;2]});}
         let endpoint=if transport=="usb"{
             match adb_forward(&app,&state){Ok((adb,owns))=>{if owns{owned_forward=Some(adb)};Ok(format!("127.0.0.1:{PORT}"))},Err(e)=>Err(e)}
-        }else{discover().map_err(|e|e.to_string())};
+        }else{discovery::discover(||state.generation.load(Ordering::SeqCst)!=generation).map_err(|e|e.to_string())};
         if state.generation.load(Ordering::SeqCst)!=generation {break}
         match endpoint {
             Ok(endpoint)=>{
