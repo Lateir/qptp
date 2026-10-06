@@ -139,13 +139,18 @@ fn adb_forward(app:&AppHandle,state:&Shared)->Result<(PathBuf,bool),String>{
     Err(format!("Не удалось настроить USB: {}",String::from_utf8_lossy(&output.stderr).trim()))
 }
 fn read_exact_checked(stream:&mut TcpStream, bytes:&mut [u8], state:&Shared, generation:u64)->io::Result<()> {
+    read_exact_deadline(stream,bytes,Duration::from_secs(5),||state.generation.load(Ordering::SeqCst)!=generation)
+}
+fn read_exact_deadline(stream:&mut impl Read,bytes:&mut [u8],timeout:Duration,cancelled:impl Fn()->bool)->io::Result<()> {
+    let deadline=Instant::now()+timeout;
     let mut offset=0;
     while offset<bytes.len() {
-        if state.generation.load(Ordering::SeqCst)!=generation {return Err(io::Error::new(io::ErrorKind::Interrupted,"Отключено"))}
+        if cancelled() {return Err(io::Error::new(io::ErrorKind::Interrupted,"Отключено"))}
+        if Instant::now()>=deadline {return Err(io::Error::new(io::ErrorKind::TimedOut,"Нет данных от модуля в течение 5 секунд"))}
         match stream.read(&mut bytes[offset..]) {
             Ok(0)=>return Err(io::Error::new(io::ErrorKind::UnexpectedEof,"Поток закрыт")),
             Ok(n)=>offset+=n,
-            Err(e) if matches!(e.kind(),io::ErrorKind::WouldBlock|io::ErrorKind::TimedOut)=>{},
+            Err(e) if matches!(e.kind(),io::ErrorKind::WouldBlock|io::ErrorKind::TimedOut|io::ErrorKind::Interrupted)=>{},
             Err(e)=>return Err(e),
         }
     }
@@ -255,12 +260,17 @@ fn worker(app:AppHandle,state:Shared,generation:u64,transport:String){
                 if !update_required {publish(&app,&state,|s|{s.phase="connecting".into();s.message="Ожидание потока модуля…".into();s.endpoint=Some(endpoint.clone())});}
                 match endpoint.parse().ok().and_then(|addr|TcpStream::connect_timeout(&addr,Duration::from_secs(2)).ok()){
                     Some(mut stream)=>{
-                        let _=stream.set_read_timeout(Some(Duration::from_millis(500)));
-                        if let Err(e)=read_frame(&mut stream,&app,&state,generation){if state.generation.load(Ordering::SeqCst)==generation{
+                        log::info!("TCP connected to {endpoint} ({transport})");
+                        let result=stream.set_read_timeout(Some(Duration::from_millis(500)))
+                            .and_then(|_|stream.set_write_timeout(Some(Duration::from_secs(2))))
+                            .and_then(|_|read_frame(&mut stream,&app,&state,generation));
+                        let _=stream.shutdown(std::net::Shutdown::Both);
+                        if let Err(e)=result{if state.generation.load(Ordering::SeqCst)==generation{
+                            log::warn!("TCP session {endpoint} ended: {e}; retrying");
                             if state.snapshot.lock().map(|s|s.module_update_required).unwrap_or(false) {
                                 publish(&app,&state,|s|{s.phase="error".into();s.message=e.to_string();s.status=None});
                             } else {
-                                publish(&app,&state,|s|{s.phase="searching".into();s.message=format!("Соединение прервано: {e}. Повторная попытка…");s.status=None})
+                                publish(&app,&state,|s|{s.phase="searching".into();s.message=format!("Соединение прервано: {e}. Повторная попытка…");s.status=None;s.left=Sensor::default();s.right=Sensor::default();s.left_buttons=[false;2];s.right_buttons=[false;2]})
                             }
                         }}
                     }
@@ -488,6 +498,42 @@ pub fn run(){
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn tcp_pair()->(TcpStream,TcpStream) {
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let client=TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (server,_)=listener.accept().unwrap();
+        client.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
+        (client,server)
+    }
+    #[test]
+    fn silent_and_partial_streams_expire_then_new_connection_works() {
+        for partial in [false,true] {
+            let (mut client,mut server)=tcp_pair();
+            if partial {server.write_all(b"QP").unwrap()}
+            let start=Instant::now();
+            let error=read_exact_deadline(&mut client,&mut [0;4],Duration::from_millis(100),||false).unwrap_err();
+            assert_eq!(error.kind(),io::ErrorKind::TimedOut);
+            assert!(start.elapsed()<Duration::from_secs(1));
+            client.shutdown(std::net::Shutdown::Both).unwrap();
+            let (mut client,mut server)=tcp_pair();
+            server.write_all(b"QPR3").unwrap();
+            let mut header=[0;4];
+            read_exact_deadline(&mut client,&mut header,Duration::from_secs(1),||false).unwrap();
+            assert_eq!(&header,b"QPR3");
+        }
+    }
+    #[test]
+    fn read_deadline_preserves_fragments_and_cancellation() {
+        let (mut client,mut server)=tcp_pair();
+        let sender=thread::spawn(move|| {
+            server.write_all(b"QP").unwrap();thread::sleep(Duration::from_millis(60));
+            server.write_all(b"R3").unwrap();
+        });
+        let mut header=[0;4];
+        read_exact_deadline(&mut client,&mut header,Duration::from_secs(1),||false).unwrap();
+        assert_eq!(&header,b"QPR3");sender.join().unwrap();
+        assert_eq!(read_exact_deadline(&mut client,&mut header,Duration::from_secs(1),||true).unwrap_err().kind(),io::ErrorKind::Interrupted);
+    }
     fn sample(y:u16,force:f32)->Sensor{Sensor{x:80,y,force,..Sensor::default()}}
     #[test]
     fn tray_shows_both_controller_batteries_on_one_line(){
