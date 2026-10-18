@@ -1,4 +1,5 @@
 #include "debug_udp.hpp"
+#include "fusion.hpp"
 #include <openvr_driver.h>
 #include <cstdio>
 #include <cstring>
@@ -17,16 +18,19 @@ static void LogError(const char* action, const char* path, int code) {
     std::snprintf(line, sizeof(line), "[qptp] %s %s error=%d", action, path, code);
     Log(line);
 }
-static bool AutoLaunchEnabled() {
+// Reads a small flag file the QPTP app writes beside its config.json.
+static std::string AppFlag(const wchar_t* name) {
     wchar_t roaming[MAX_PATH]{};
     const DWORD length = GetEnvironmentVariableW(L"APPDATA", roaming, MAX_PATH);
-    if (!length || length >= MAX_PATH) return true;
-    const auto file = std::filesystem::path(roaming) / L"dev.lateir.qptp" / L"steamvr_lifecycle";
-    std::ifstream input(file, std::ios::binary);
-    char value = '1';
-    if (input.get(value) && value == '0') return false;
-    return true;
+    if (!length || length >= MAX_PATH) return {};
+    std::ifstream input(std::filesystem::path(roaming) / L"dev.lateir.qptp" / name, std::ios::binary);
+    std::string value; std::getline(input, value);
+    while (!value.empty() && (value.back() == '\r' || value.back() == ' ')) value.pop_back();
+    return value;
 }
+static bool AutoLaunchEnabled() { return AppFlag(L"steamvr_lifecycle") != "0"; }
+static bool FusionRequested() { return AppFlag(L"steamvr_driver_mode") == "fusion"; }
+static bool Quest3IsPro() { return AppFlag(L"steamvr_fusion_quest3") == "pro"; }
 static void LaunchInstalledApp() {
     if (!AutoLaunchEnabled()) {
         Log("[qptp] SteamVR lifecycle disabled; skipping application autostart");
@@ -76,6 +80,7 @@ struct PadHandles {
     vr::VRInputComponentHandle_t y = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t touch = vr::k_ulInvalidInputComponentHandle;
     vr::VRInputComponentHandle_t force = vr::k_ulInvalidInputComponentHandle;
+    vr::VRInputComponentHandle_t click = vr::k_ulInvalidInputComponentHandle;
 };
 struct HandHandles {
     PadHandles pad;
@@ -113,6 +118,7 @@ class AuxiliaryDevice final : public vr::ITrackedDeviceServerDriver {
         make("pad/y"); Scalar(container, path, hand.pad.y, vr::VRScalarUnits_NormalizedTwoSided);
         make("pad/touch"); Boolean(container, path, hand.pad.touch);
         make("pad/force"); Scalar(container, path, hand.pad.force, vr::VRScalarUnits_NormalizedOneSided);
+        make("pad/click"); Boolean(container, path, hand.pad.click);
         make("single_button/click"); Boolean(container, path, hand.single_button);
         make("double_button_1/click"); Boolean(container, path, hand.double_button_1);
         make("double_button_2/click"); Boolean(container, path, hand.double_button_2);
@@ -130,7 +136,7 @@ class AuxiliaryDevice final : public vr::ITrackedDeviceServerDriver {
     }
     void UpdateHand(const HandHandles& h, const AddonState& s) {
         UpdateScalar(h.pad.x, s.pad.x); UpdateScalar(h.pad.y, s.pad.y);
-        UpdateBoolean(h.pad.touch, s.pad.touch); UpdateScalar(h.pad.force, s.pad.force);
+        UpdateBoolean(h.pad.touch, s.pad.touch); UpdateScalar(h.pad.force, s.pad.force); UpdateBoolean(h.pad.click, s.pad.click);
         UpdateBoolean(h.single_button, s.single_button);
         UpdateBoolean(h.double_button_1, s.double_button_1);
         UpdateBoolean(h.double_button_2, s.double_button_2);
@@ -172,9 +178,9 @@ public:
             last_log_ = std::chrono::steady_clock::now();
             const auto& l = state.left; const auto& r = state.right;
             char line[384];
-            std::snprintf(line, sizeof(line), "[qptp] Input update L=(%.2f,%.2f,t%d,f%.2f,s%d,d%d,d%d,st%.2f,tp%.2f,ts%.2f) R=(%.2f,%.2f,t%d,f%.2f,s%d,d%d,d%d,st%.2f,tp%.2f,ts%.2f)",
-                l.pad.x, l.pad.y, l.pad.touch, l.pad.force, l.single_button, l.double_button_1, l.double_button_2, l.stylus, l.trigger_proximity, l.trigger_slide,
-                r.pad.x, r.pad.y, r.pad.touch, r.pad.force, r.single_button, r.double_button_1, r.double_button_2, r.stylus, r.trigger_proximity, r.trigger_slide);
+            std::snprintf(line, sizeof(line), "[qptp] Input update L=(%.2f,%.2f,t%d,c%d,f%.2f,s%d,d%d,d%d,st%.2f,tp%.2f,ts%.2f) R=(%.2f,%.2f,t%d,c%d,f%.2f,s%d,d%d,d%d,st%.2f,tp%.2f,ts%.2f)",
+                l.pad.x, l.pad.y, l.pad.touch, l.pad.click, l.pad.force, l.single_button, l.double_button_1, l.double_button_2, l.stylus, l.trigger_proximity, l.trigger_slide,
+                r.pad.x, r.pad.y, r.pad.touch, r.pad.click, r.pad.force, r.single_button, r.double_button_1, r.double_button_2, r.stylus, r.trigger_proximity, r.trigger_slide);
             Log(line);
         }
     }
@@ -239,12 +245,20 @@ class Provider final : public vr::IServerTrackedDeviceProvider {
     BatteryDevice left_battery_{"left"}, right_battery_{"right"};
     DebugUdpInputSource* source_ = nullptr;
     InputState state_{};
+    const char* mode_ = "classic"; // classic, fusion, or fallback when Fusion was requested but could not hook.
+    bool fusion_ = false;
 public:
     vr::EVRInitError Init(vr::IVRDriverContext* context) override {
         VR_INIT_SERVER_DRIVER_CONTEXT(context);
         Log("[qptp] Driver initialized");
         source_ = new DebugUdpInputSource();
         Log(source_->ready() ? "[qptp] Debug UDP listening on 127.0.0.1:39571" : "[qptp] Debug UDP failed to bind port 39571");
+        if (FusionRequested()) {
+            fusion_ = fusion::Start(Quest3IsPro());
+            mode_ = fusion_ ? "fusion" : "fallback";
+            if (fusion_) { LaunchInstalledApp(); return vr::VRInitError_None; }
+            Log("[qptp] Fusion could not hook controller creation; using Classic");
+        }
         const bool added = vr::VRServerDriverHost()->TrackedDeviceAdded("qptp_input", vr::TrackedDeviceClass_Controller, &device_);
         Log(added ? "[qptp] Device registered serial=qptp_input" : "[qptp] Device registration failed");
         // Battery devices are optional: failing to add them must not disable the input device.
@@ -255,16 +269,17 @@ public:
         return added ? vr::VRInitError_None : vr::VRInitError_Driver_Failed;
     }
     void Cleanup() override {
+        if (fusion_) { fusion::Stop(); fusion_ = false; }
         delete source_; source_ = nullptr;
         Log("[qptp] Driver cleanup");
         VR_CLEANUP_SERVER_DRIVER_CONTEXT();
     }
     const char* const* GetInterfaceVersions() override { return vr::k_InterfaceVersions; }
     void RunFrame() override {
+        if (source_) source_->set_acknowledgement(std::string("QPTP2 mode=") + mode_ + " " + (fusion_ ? fusion::Report() : "left=0 right=0 q3left=0 q3right=0 conflict=none"));
         const bool changed = source_ && source_->Poll(state_);
-        device_.RunFrame(state_, changed);
-        left_battery_.RunFrame(state_.left);
-        right_battery_.RunFrame(state_.right);
+        if (fusion_) fusion::RunFrame(state_);
+        else { device_.RunFrame(state_, changed); left_battery_.RunFrame(state_.left); right_battery_.RunFrame(state_.right); }
         vr::VREvent_t event{};
         while (vr::VRServerDriverHost()->PollNextEvent(&event, sizeof(event))) {}
     }

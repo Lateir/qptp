@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Quest Pro Touch Plus",
-        "width": 780,
-        "height": 330,
+        "width": 860,
+        "height": 400,
         "resizable": false,
         "maximizable": false,
         "fullscreen": false,

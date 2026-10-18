@@ -35,8 +35,7 @@ bool DebugUdpInputSource::Poll(InputState& state) {
         const int length = recvfrom(socket_, buffer, 2048, 0, reinterpret_cast<sockaddr*>(&sender), &sender_length);
         if (length == SOCKET_ERROR) break;
         if (sender.sin_addr.s_addr != htonl(INADDR_LOOPBACK)) continue;
-        static constexpr char acknowledgement[] = "QPTP1";
-        sendto(socket_, acknowledgement, sizeof(acknowledgement) - 1, 0,
+        sendto(socket_, acknowledgement_.data(), static_cast<int>(acknowledgement_.size()), 0,
             reinterpret_cast<sockaddr*>(&sender), sender_length);
         buffer[length] = 0;
         received = true;
@@ -59,10 +58,12 @@ bool DebugUdpInputSource::Poll(InputState& state) {
                     else if (key == "left_pad_y") state.left.pad.y = two;
                     else if (key == "left_pad_touch") state.left.pad.touch = on;
                     else if (key == "left_pad_force") state.left.pad.force = one;
+                    else if (key == "left_pad_click") state.left.pad.click = on;
                     else if (key == "right_pad_x") state.right.pad.x = two;
                     else if (key == "right_pad_y") state.right.pad.y = two;
                     else if (key == "right_pad_touch") state.right.pad.touch = on;
                     else if (key == "right_pad_force") state.right.pad.force = one;
+                    else if (key == "right_pad_click") state.right.pad.click = on;
                     else if (key == "left_single_button") state.left.single_button = on;
                     else if (key == "left_double_button_1") state.left.double_button_1 = on;
                     else if (key == "left_double_button_2") state.left.double_button_2 = on;
@@ -87,7 +88,7 @@ bool DebugUdpInputSource::Poll(InputState& state) {
     }
     if (received) last_packet_ = std::chrono::steady_clock::now();
     if (last_packet_ != std::chrono::steady_clock::time_point{} &&
-        std::chrono::steady_clock::now() - last_packet_ > std::chrono::seconds(2)) {
+        std::chrono::steady_clock::now() - last_packet_ > std::chrono::milliseconds(500)) {
         state = {};
         last_packet_ = {};
         return true;

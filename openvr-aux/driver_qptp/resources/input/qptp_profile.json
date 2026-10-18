@@ -8,8 +8,8 @@
   "input_bindingui_right": { "image": "{qptp}/icons/qptp.svg" },
   "input_source": {
     "/pose/raw": { "type": "pose", "order": 0 },
-    "/input/left_pad": { "type": "trackpad", "touch": true, "force": true, "binding_image_point": [50, 55], "order": 1 },
-    "/input/right_pad": { "type": "trackpad", "touch": true, "force": true, "binding_image_point": [170, 55], "order": 2 },
+    "/input/left_pad": { "type": "trackpad", "click": true, "touch": true, "force": true, "binding_image_point": [50, 55], "order": 1 },
+    "/input/right_pad": { "type": "trackpad", "click": true, "touch": true, "force": true, "binding_image_point": [170, 55], "order": 2 },
     "/input/left_single_button": { "type": "button", "click": true, "binding_image_point": [25, 125], "order": 3 },
     "/input/left_double_button_1": { "type": "button", "click": true, "binding_image_point": [50, 125], "order": 4 },
     "/input/left_double_button_2": { "type": "button", "click": true, "binding_image_point": [75, 125], "order": 5 },

@@ -9,6 +9,6 @@ if (!(Test-Path -LiteralPath $vcvars)) { throw "vcvars64.bat is missing from $in
 $output = Join-Path $root 'driver_qptp\bin\win64'
 $intermediate = Join-Path $root 'build-msvc'
 New-Item -ItemType Directory -Force -Path $output,$intermediate | Out-Null
-$command = 'call "' + $vcvars + '" >nul && cd /d "' + $intermediate + '" && cl /nologo /std:c++17 /EHsc /MD /O2 /LD /I"' + (Join-Path $root 'vendor\openvr') + '" "' + (Join-Path $root 'src\driver.cpp') + '" "' + (Join-Path $root 'src\debug_udp.cpp') + '" ws2_32.lib /link /OUT:"' + (Join-Path $output 'driver_qptp.dll') + '"'
+$command = 'call "' + $vcvars + '" >nul && cd /d "' + $intermediate + '" && cl /nologo /std:c++17 /EHsc /MD /O2 /LD /I"' + (Join-Path $root 'vendor\openvr') + '" "' + (Join-Path $root 'src\driver.cpp') + '" "' + (Join-Path $root 'src\debug_udp.cpp') + '" "' + (Join-Path $root 'src\fusion.cpp') + '" ws2_32.lib /link /OUT:"' + (Join-Path $output 'driver_qptp.dll') + '"'
 cmd.exe /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Driver build failed: $LASTEXITCODE" }

@@ -7,6 +7,7 @@ param(
     [ValidateRange(-1, 1)][float]$Y = -0.2,
     [ValidateRange(0, 1)][float]$Force = 0.8,
     [switch]$Touch,
+    [switch]$Click,
     [switch]$Button1,
     [switch]$Button2
 )
@@ -21,6 +22,7 @@ if ($Mode -eq 'touchpad') {
     $lines += "${Side}_pad_y=$($Y.ToString([cultureinfo]::InvariantCulture))"
     $lines += "${Side}_pad_touch=$([int]$Touch.IsPresent)"
     $lines += "${Side}_pad_force=$($Force.ToString([cultureinfo]::InvariantCulture))"
+    $lines += "${Side}_pad_click=$([int]$Click.IsPresent)"
 }
 if ($Mode -eq 'one-button') { $lines += "${Side}_single_button=$([int]$Button1.IsPresent)" }
 if ($Mode -eq 'two-buttons') {

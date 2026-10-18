@@ -4,12 +4,12 @@
 
 :root{
   --bg:#f6f6f4;--surface:#ffffff;--ink:#111113;--muted:#8b8b90;--line:#e2e2de;--chip:#8f8f94;--chip-ink:#ffffff;
-  --on:#22b357;--off:#c4c4c8;
+  --on:#22b357;--off:#c4c4c8;--warn:#c27c00;
   --display:'Unbounded Variable',sans-serif;--ui:'Manrope Variable','Segoe UI',sans-serif;--mono:'JetBrains Mono Variable',Consolas,monospace;
   color-scheme:light dark;font-family:var(--ui);color:var(--ink);background:var(--bg);font-synthesis:none;-webkit-font-smoothing:antialiased;
 }
 @media (prefers-color-scheme:dark){
-  :root{--bg:#111113;--surface:#1a1a1d;--ink:#ededee;--muted:#76767e;--line:#2a2a2f;--chip:#3a3a40;--chip-ink:#ffffff;--on:#2fcf6a;--off:#44444b}
+  :root{--bg:#111113;--surface:#1a1a1d;--ink:#ededee;--muted:#76767e;--line:#2a2a2f;--chip:#3a3a40;--chip-ink:#ffffff;--on:#2fcf6a;--off:#44444b;--warn:#e0a030}
 }
 *{box-sizing:border-box}
 html,body,#app{height:100%}
@@ -17,7 +17,7 @@ body{margin:0;overflow:hidden;background:var(--bg);user-select:none;cursor:defau
 button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;padding:0}
 button:disabled{cursor:default}
 
-.app{display:grid;grid-template-columns:150px 1fr 150px;gap:14px;height:100%;padding:14px;direction:ltr}
+.app{display:grid;grid-template-columns:160px 1fr 160px;gap:14px;height:100%;padding:14px;direction:ltr}
 .app.sensors-active{grid-template-columns:minmax(0,1fr)}
 /* Keep the physical left/right controller positions fixed in Arabic. */
 html[dir="rtl"] .app>.pad,html[dir="rtl"] .app>.center{direction:rtl}
@@ -34,6 +34,16 @@ html[dir="rtl"] .card{direction:rtl}
 .field{position:absolute;inset:16px}
 /* White + difference: reads as an ink dot on the pad and inverts the digits underneath, in both themes. */
 .dot{position:absolute;border-radius:50%;background:#fff;mix-blend-mode:difference;transform:translate(-50%,-50%);transition:width 60ms linear,height 60ms linear}
+/* Preview of what SteamVR receives: an undecided contact is faint, a rejected resting thumb is a dashed outline. */
+.dot.pending{opacity:.4}
+.dot.rejected{background:transparent;mix-blend-mode:normal;border:1.5px dashed var(--muted)}
+.click-ring{position:absolute;border:2px solid var(--on);border-radius:50%;transform:translate(-50%,-50%);transition:width 60ms linear,height 60ms linear}
+.trace{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+.trace line{stroke:var(--muted);stroke-width:1.5;stroke-dasharray:3 3;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.trace line.glide{stroke:var(--on);stroke-width:3;stroke-dasharray:none}
+.anchor{position:absolute;width:14px;height:14px;border:1.5px solid var(--muted);border-radius:50%;transform:translate(-50%,-50%)}
+.glide-tip{position:absolute;width:9px;height:9px;border-radius:50%;background:var(--on);transform:translate(-50%,-50%)}
+.cursor-mark{position:absolute;width:14px;height:20px;fill:var(--ink);stroke:var(--surface);stroke-width:1;stroke-linejoin:round;transform:translate(-2px,-2px)}
 .button-pad{display:flex;flex-direction:column;align-items:center;padding:20px 13px;gap:12px}
 .pad-force{width:100%;display:flex;align-items:baseline;justify-content:space-between;color:var(--muted)}
 .pad-force span,.pad-threshold,.pad-zones span{font-size:10px;font-weight:700;letter-spacing:.05em}
@@ -100,6 +110,44 @@ h1 em{font-style:normal;font-weight:250;color:var(--muted)}
 .dual-range input:focus-visible{outline:2px solid var(--on);outline-offset:2px}
 .dual-range input:disabled{opacity:.5}
 .mode-error{max-width:340px;margin:0;font-size:10px;text-align:center;color:#e5484d}
+.mode-panel.compact{gap:11px}
+.mode-panel.compact .threshold-control,.pad-options{width:min(100%,360px)}
+.style-picker{display:flex;flex-direction:column;align-items:center;gap:5px}
+.segmented{display:flex;padding:3px;border:1px solid var(--line);border-radius:999px;background:var(--surface)}
+.segmented button{padding:5px 12px;border-radius:999px;font-size:11px;font-weight:600;color:var(--muted);transition:color .15s,box-shadow .15s}
+.segmented button:hover{color:var(--ink)}
+.segmented button.active{color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.segmented button:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+.style-note{margin:0;font-size:10px;color:var(--muted);text-align:center}
+.pad-options{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.switch-row{flex:1;justify-content:space-between;min-width:0;display:flex;align-items:center;gap:9px;font-size:11px;font-weight:600;cursor:pointer}
+.switch-row span{min-width:0;display:flex;flex-direction:column;gap:1px}
+.switch-row small{font-size:9px;font-weight:500;color:var(--muted)}
+.ghost-button,.primary-button{flex:none;height:28px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);font-size:11px;font-weight:600;transition:border-color .15s,opacity .15s}
+.ghost-button:hover:not(:disabled){border-color:var(--ink)}
+.primary-button{border-color:var(--ink);background:var(--ink);color:var(--bg)}
+.ghost-button:disabled,.primary-button:disabled{opacity:.35}
+.ghost-button:focus-visible,.primary-button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+.calibration-panel{width:min(100%,400px);display:flex;flex-direction:column;align-items:center;gap:11px}
+.calibration-panel header{width:100%;display:flex;align-items:baseline;justify-content:space-between}
+.calibration-panel h2{margin:0;font-size:14px;font-weight:700}
+.calibration-panel header span{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.calibration-hint{min-height:16px;margin:0;font-size:12px;text-align:center}
+.calibration-pads{display:flex;gap:22px;direction:ltr}
+.calibration-pads figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:6px}
+.mini-pad{position:relative;width:112px;height:112px;border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden;transition:opacity .2s}
+.calibration-pads figure:not(.online) .mini-pad{opacity:.45}
+.edge-box{position:absolute;border:1.5px solid var(--on);border-radius:6px;background:color-mix(in srgb,var(--on) 10%,transparent)}
+.mini-dot{position:absolute;width:10px;height:10px;border-radius:50%;background:var(--ink);transform:translate(-50%,-50%)}
+.mini-pad .trace line{stroke:var(--on);stroke-width:2.5;stroke-dasharray:none}
+.force-band{position:absolute;left:0;right:0;background:color-mix(in srgb,var(--on) 16%,transparent)}
+.force-level{position:absolute;left:50%;bottom:0;width:18px;margin-left:-9px;border-radius:5px 5px 0 0;background:var(--on);transition:height 60ms linear}
+.calibration-pads figcaption{display:flex;flex-direction:column;align-items:center;gap:1px}
+.calibration-pads figcaption b{font-size:11px}
+.calibration-pads figcaption span{font-family:var(--mono);font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+.calibration-actions{width:100%;display:flex;align-items:center;gap:6px}
+.calibration-actions span{flex:1}
 
 .sensors-panel{width:100%}
 .sensor-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
@@ -126,12 +174,32 @@ h1 em{font-style:normal;font-weight:250;color:var(--muted)}
 .language-control select:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
 .steamvr-lifecycle{width:304px;display:flex;align-items:center;justify-content:space-between;gap:12px;direction:ltr;font-size:11px;font-weight:600;cursor:pointer}
 .steamvr-lifecycle span{min-width:0;direction:inherit}
-.steamvr-lifecycle input{appearance:none;flex:none;width:38px;height:22px;margin:0;border:1px solid var(--line);border-radius:999px;background:var(--chip);cursor:pointer;transition:background .15s,border-color .15s}
-.steamvr-lifecycle input::before{content:"";display:block;width:16px;height:16px;margin:2px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0003;transition:transform .15s}
-.steamvr-lifecycle input:checked{background:var(--on);border-color:var(--on)}
-.steamvr-lifecycle input:checked::before{transform:translateX(16px)}
-.steamvr-lifecycle input:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
-.steamvr-lifecycle input:disabled{opacity:.55;cursor:default}
+.steamvr-lifecycle input,.switch-row input{appearance:none;flex:none;width:38px;height:22px;margin:0;border:1px solid var(--line);border-radius:999px;background:var(--chip);cursor:pointer;transition:background .15s,border-color .15s}
+.steamvr-lifecycle input::before,.switch-row input::before{content:"";display:block;width:16px;height:16px;margin:2px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0003;transition:transform .15s}
+.steamvr-lifecycle input:checked,.switch-row input:checked{background:var(--on);border-color:var(--on)}
+.steamvr-lifecycle input:checked::before,.switch-row input:checked::before{transform:translateX(16px)}
+html[dir="rtl"] .switch-row input:checked::before{transform:translateX(-16px)}
+.steamvr-lifecycle input:focus-visible,.switch-row input:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.steamvr-lifecycle input:disabled,.switch-row input:disabled{opacity:.55;cursor:default}
+.driver-control{width:304px;display:flex;flex-direction:column;gap:5px}
+.driver-label{font-size:11px;font-weight:600}
+.driver-modes{display:flex;gap:8px}
+.driver-modes button{flex:1;min-width:0;padding:7px 10px;border:1px solid var(--line);border-radius:12px;background:var(--surface);display:flex;flex-direction:column;align-items:flex-start;gap:1px;text-align:start;transition:border-color .15s}
+.driver-modes button:hover,.driver-modes button.active{border-color:var(--ink)}
+.driver-modes button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.driver-modes b{font-size:12px;display:flex;align-items:center}
+.driver-modes small{font-size:10px;color:var(--muted)}
+.beta-chip{margin-inline-start:5px;padding:1px 5px;border:1px solid var(--on);border-radius:999px;color:var(--on);font:700 8px/1.3 var(--ui);font-style:normal;letter-spacing:.08em}
+.driver-status{margin:0;font-size:10px;color:var(--muted)}
+.driver-status.ok{color:var(--on)}
+.driver-status.warn{color:var(--warn)}
+.inline-link{margin-inline-start:6px;color:var(--muted);font-size:10px;text-decoration:underline;text-underline-offset:2px}
+.inline-link:hover{color:var(--ink)}
+.prompt-backdrop{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;padding:24px;background:color-mix(in srgb,var(--bg) 72%,transparent);backdrop-filter:blur(3px)}
+.prompt-card{width:min(100%,380px);padding:18px 20px 16px;border:1px solid var(--line);border-radius:16px;background:var(--surface);display:flex;flex-direction:column;gap:9px}
+.prompt-card h2{margin:0;font-size:15px;font-weight:700}
+.prompt-card p{margin:0;font-size:12px;line-height:1.45;color:var(--muted)}
+.prompt-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
 .module-link{width:304px;min-height:55px;margin-top:3px;padding:9px 12px;border:1px solid var(--line);border-radius:14px;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center;transition:border-color .15s,transform .15s}
 .module-link:hover{border-color:var(--ink);transform:translateY(-1px)}
 .module-link:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
