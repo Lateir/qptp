@@ -2,7 +2,7 @@
 
 The driver has two modes. The app writes the selected one to `%APPDATA%\dev.lateir.qptp\steamvr_driver_mode` (`classic` or `fusion`), and the driver reads it once when SteamVR starts.
 
-**Classic** (default) adds one controller-class input device, `qptp_input`, with a `TrackedControllerRole_Treadmill` hint alongside the normal Quest Pro controllers. It exposes two pads (X, Y, touch, click, force), six mode-specific buttons, and three analog sensors per side (stylus, trigger proximity, trigger slide). Two more input-less devices, `qptp_left_battery` and `qptp_right_battery`, only show each controller's battery level in SteamVR.
+**Classic** (preserved on updates from Classic) adds one controller-class input device, `qptp_input`, with a `TrackedControllerRole_Treadmill` hint alongside the normal Quest Pro controllers. It exposes two pads (X, Y, touch, click, force), six mode-specific buttons, and three analog sensors per side (stylus, trigger proximity, trigger slide). Two more input-less devices, `qptp_left_battery` and `qptp_right_battery`, only show each controller's battery level in SteamVR.
 
 **Fusion** (beta) adds no devices. In `Init`, it replaces the first entry of the `IVRServerDriverHost` vtable (`TrackedDeviceAdded`) and wraps every controller that another driver creates. When a wrapped controller activates with a `quest_pro` render model, the `{oculus}/input/touch_profile.json` profile and a hand role, Fusion:
 - switches it to `{qptp}/input/qptp_quest_pro_profile.json` (controller type `qptp_quest_pro`);
@@ -70,3 +70,26 @@ $driver = (Resolve-Path .\openvr-aux\driver_qptp).Path
 ```
 
 The driver directory can then be removed. The driver writes property and input API errors through `IVRDriverLog` to `vrserver.txt`. It updates components each frame and logs received input changes at most once per second.
+
+## Finger tracking (development)
+
+Fusion is the default for new installations; existing driver choices are preserved. Fusion supports a live **Finger tracking** switch, disabled by default. It adds thumb-rest position and
+index proximity/slide to each adopted hand. Native skeletons are retained as the baseline. If no native
+component exists, QPTP creates a synthesized hand animated from ordinary trigger/grip/touch inputs.
+Both WithController and WithoutController streams are supplied. Turning the switch off restores the
+baseline immediately; Classic mode does not provide this feature.
+
+The physical finger channel is independent of pad mode/style and resting-thumb rejection. QPR4 contact
+flags are authoritative. Sensors older than 500 ms are ignored even if the app continues UDP heartbeats.
+The UDP extension uses `skeleton_enabled` and per-side `finger_{x,y,contact,proximity,slide,valid,age_ms}`.
+Raw proximity/slide are not clamped by the app on this channel. The QPTP2 reply adds `skelleft`/`skelright`
+with `active`, `waiting`, `disabled`, `error`, or `unavailable`; absence means an older driver.
+
+The skeletal interceptor covers IVRDriverInput_003/_004 and a validated compatible prefix of _005
+on Windows x64. _005 support is enabled only after checking the _004 forwarding thunks and matching implementation tables. MinHook also captures cached skeleton-update entry points. Like Fusion's controller hook, this integration is outside the public driver API and must
+be checked against SteamVR/runtime updates. Devices not adopted by Fusion pass through unchanged.
+
+Sensor range/contact checks have been performed on Quest Pro through Virtual Desktop; visual pose fit and multi-runtime regression checks are still in progress.
+See [SKELETON-VERIFY.md](SKELETON-VERIFY.md) for exact capture, verification and rollback steps.
+The hand geometry uses [Valve's sample](vendor/hand_simulation/README.md); the driver's Valve license
+notice is included in `driver_qptp/LICENSE.Valve.txt`.

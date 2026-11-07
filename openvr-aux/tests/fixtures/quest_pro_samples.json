@@ -1,0 +1,70 @@
+{
+  "hardware": "Quest Pro Touch Pro",
+  "transport": "Virtual Desktop",
+  "captured": "2026-11-07",
+  "note": "Median of 1\u20132 second windows after user-confirmed poses; lifted proximity is not an established hardware endpoint.",
+  "samples": [
+    {
+      "state": "index_lifted",
+      "side": "left",
+      "proximity": 0.6392157,
+      "slide": 0.0,
+      "contact": 0.0
+    },
+    {
+      "state": "index_lifted",
+      "side": "right",
+      "proximity": 0.98823535,
+      "slide": 0.34901962,
+      "contact": 0.0
+    },
+    {
+      "state": "index_rest",
+      "side": "left",
+      "proximity": 1.0,
+      "slide": 0.0,
+      "contact": 0.0
+    },
+    {
+      "state": "index_rest",
+      "side": "right",
+      "proximity": 1.0,
+      "slide": 0.03529412,
+      "contact": 0.0
+    },
+    {
+      "state": "index_pressed",
+      "side": "left",
+      "proximity": 1.0,
+      "slide": 0.07647059249999999,
+      "contact": 0.0
+    },
+    {
+      "state": "index_pressed",
+      "side": "right",
+      "proximity": 1.0,
+      "slide": 0.098039225,
+      "contact": 0.0
+    },
+    {
+      "state": "thumb_center",
+      "side": "left",
+      "x": 127.0,
+      "y": 128.0,
+      "force": 0.0,
+      "contact": 1.0,
+      "proximity": 0.6627451,
+      "slide": 0.0
+    },
+    {
+      "state": "thumb_center",
+      "side": "right",
+      "x": 141.0,
+      "y": 131.0,
+      "force": 0.0,
+      "contact": 1.0,
+      "proximity": 0.7019608,
+      "slide": 0.0
+    }
+  ]
+}

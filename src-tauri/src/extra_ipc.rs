@@ -3,7 +3,7 @@ use serde::Serialize;
 // What the qptp driver reported in its last acknowledgement. QPTP1 drivers only ever run Classic.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DriverReport { pub mode: Option<String>, pub adopted: [bool; 2], pub quest3: [bool; 2], pub conflict: Option<String> }
+pub(crate) struct DriverReport { pub mode: Option<String>, pub adopted: [bool; 2], pub quest3: [bool; 2], pub conflict: Option<String>, pub skeleton: [Option<String>; 2] }
 
 // Parses `QPTP1` or `QPTP2 mode=fusion left=1 right=0 q3left=0 q3right=0 conflict=none`; q3* marks controllers that report a Quest 3 model.
 pub(crate) fn parse_ack(reply: &[u8]) -> Option<DriverReport> {
@@ -20,6 +20,7 @@ pub(crate) fn parse_ack(reply: &[u8]) -> Option<DriverReport> {
             "right" => report.adopted[1] = value == "1",
             "q3left" => report.quest3[0] = value == "1",
             "q3right" => report.quest3[1] = value == "1",
+            "skelleft" | "skelright" if matches!(value,"active"|"waiting"|"disabled"|"error"|"unavailable") => report.skeleton[usize::from(key=="skelright")]=Some(value.into()),
             "conflict" if value != "none" && !value.is_empty() => report.conflict = Some(value.chars().take(32).collect()),
             _ => {}
         }
@@ -44,6 +45,19 @@ mod windows {
         };
         // The pad values are already gated by mode and controller state in touch::Engine::step.
         let live = controller_live(snapshot, side);
+        let age = snapshot.sensor_received.map(|received| crate::touch::now_us().saturating_sub(received));
+        let fresh = live && sensor.trigger_proximity.is_finite() && sensor.trigger_slide.is_finite() && age.is_some_and(|age| age < 500_000);
+        let hand = usize::from(side == "right");
+        let (x,y) = crate::touch::normalize(&snapshot.touchpad.calibration, hand, sensor.x, sensor.y);
+        output.push(format!("skeleton_enabled={}",u8::from(snapshot.skeleton_input)));
+        output.push(format!("{side}_finger_valid={}",u8::from(fresh)));
+        output.push(format!("{side}_finger_age_ms={}",age.unwrap_or(u64::MAX).saturating_div(1000)));
+        output.push(format!("{side}_finger_x={x:.5}"));
+        output.push(format!("{side}_finger_y={y:.5}"));
+        output.push(format!("{side}_finger_contact={}",u8::from(fresh && sensor.touch == Some(true))));
+        for (name,value) in [("finger_proximity",sensor.trigger_proximity),("finger_slide",sensor.trigger_slide)] {
+            output.push(format!("{side}_{name}={:.5}",if fresh && value.is_finite(){value}else{0.0}));
+        }
         let single = live && snapshot.input_mode == "button" && buttons[0];
         let double_first = live && snapshot.input_mode == "two_buttons" && buttons[0];
         let double_second = live && snapshot.input_mode == "two_buttons" && buttons[1];
@@ -105,6 +119,7 @@ mod windows {
             snapshot.left.x = 255;
             snapshot.left.y = 0;
             snapshot.left.force = 0.8;
+            snapshot.left.touch = Some(true);
             snapshot.left_buttons = [true, true];
             snapshot.engine.feed(0, crate::touch_raw(&snapshot.left), 0, &snapshot.touchpad);
             let fields = refreshed(&mut snapshot, "left");
@@ -129,6 +144,30 @@ mod windows {
             let fields = refreshed(&mut snapshot, "left");
             assert!(fields.iter().any(|s| s == "left_single_button=0"));
             assert!(fields.iter().any(|s| s == "left_pad_touch=0"));
+        }
+        #[test]
+        fn physical_fingers_ignore_control_modes_and_require_fresh_samples() {
+            let mut s=Snapshot::default();
+            s.skeleton_input=true;
+            s.phase="connected".into();s.left.x=255;s.left.y=0;s.left.touch=Some(true);
+            s.left.trigger_proximity=1.25;s.left.trigger_slide=-0.25;
+            for mode in ["touchpad","button","two_buttons"] {
+                for style in ["absolute","joystick","swipe","mouse"] {
+                    s.input_mode=mode.into();s.touchpad.style=style.into();
+                    s.sensor_received=Some(crate::touch::now_us());
+                    let mut fields=Vec::new();lines(&s,"left",&mut fields);
+                    for expected in ["skeleton_enabled=1","left_finger_valid=1","left_finger_contact=1","left_finger_x=1.00000","left_finger_proximity=1.25000","left_finger_slide=-0.25000"] {
+                        assert!(fields.iter().any(|f|f==expected),"{mode}/{style}: {expected}");
+                    }
+                }
+            }
+            s.sensor_received=None;
+            let mut fields=Vec::new();lines(&s,"left",&mut fields);
+            assert!(fields.contains(&"left_finger_valid=0".into()));
+            assert!(fields.contains(&"left_finger_contact=0".into()));
+            s.sensor_received=Some(crate::touch::now_us());s.left.trigger_proximity=f32::NAN;
+            fields.clear();lines(&s,"left",&mut fields);
+            assert!(fields.contains(&"left_finger_proximity=0.00000".into()));
         }
         #[test]
         fn analog_inputs_and_battery_follow_the_correct_side() {
@@ -164,9 +203,11 @@ mod tests {
     fn acknowledgements_report_the_driver_mode() {
         assert_eq!(parse_ack(b"QPTP1").unwrap().mode.as_deref(), Some("classic"));
         let fusion = parse_ack(b"QPTP2 mode=fusion left=1 right=0 q3left=0 q3right=1 conflict=none").unwrap();
-        assert_eq!(fusion, DriverReport { mode: Some("fusion".into()), adopted: [true, false], quest3: [false, true], conflict: None });
+        assert_eq!(fusion, DriverReport { mode: Some("fusion".into()), adopted: [true, false], quest3: [false, true], conflict: None, skeleton: [None,None] });
         assert_eq!(parse_ack(b"QPTP2 mode=fallback conflict=qftplus").unwrap().conflict.as_deref(), Some("qftplus"));
         assert!(parse_ack(b"QPTP2 mode=other").is_none());
         assert!(parse_ack(b"hello").is_none());
+        let report=parse_ack(b"QPTP2 mode=fusion skelleft=active skelright=waiting").unwrap();
+        assert_eq!(report.skeleton,[Some("active".into()),Some("waiting".into())]);
     }
 }

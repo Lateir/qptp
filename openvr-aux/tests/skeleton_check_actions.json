@@ -1,0 +1,8 @@
+{
+  "action_sets": [{"name": "/actions/check", "usage": "leftright"}],
+  "actions": [
+    {"name": "/actions/check/in/left", "type": "skeleton", "skeleton": "/skeleton/hand/left"},
+    {"name": "/actions/check/in/right", "type": "skeleton", "skeleton": "/skeleton/hand/right"}
+  ],
+  "default_bindings": [{"controller_type": "qptp_quest_pro", "binding_url": "skeleton_check_bindings.json"}]
+}

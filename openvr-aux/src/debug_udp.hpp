@@ -9,9 +9,11 @@ class DebugUdpInputSource final : public IInputSource {
     SOCKET socket_ = INVALID_SOCKET;
     bool winsock_ = false;
     std::chrono::steady_clock::time_point last_packet_{};
+    std::chrono::steady_clock::time_point last_poll_{};
     std::string acknowledgement_ = "QPTP1";
 public:
-    DebugUdpInputSource();
+    explicit DebugUdpInputSource(unsigned short port = 39571);
+    unsigned short local_port() const;
     ~DebugUdpInputSource() override;
     bool Poll(InputState& state) override;
     bool ready() const { return socket_ != INVALID_SOCKET; }

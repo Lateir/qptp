@@ -44,6 +44,15 @@ jobs:
       - name: Build SteamVR driver
         run: .\openvr-aux\build-driver.ps1
 
+      - name: Test SteamVR driver
+        run: |
+          cmake -S openvr-aux -B openvr-aux/build -A x64
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed" }
+          cmake --build openvr-aux/build --config Release --target skeleton_test udp_test
+          if ($LASTEXITCODE -ne 0) { throw "Native test build failed" }
+          ctest --test-dir openvr-aux/build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "Native tests failed" }
+
       - name: Build NSIS installer
         run: npm run tauri -- build --bundles nsis
 
@@ -65,6 +74,11 @@ jobs:
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $installers[0].FullName --clobber --repo $env:GITHUB_REPOSITORY
           } else {
-            gh release create $tag $installers[0].FullName --verify-tag --generate-notes --title $tag --repo $env:GITHUB_REPOSITORY
+            $notes = "docs/releases/$tag.md"
+            if (Test-Path -LiteralPath $notes) {
+              gh release create $tag $installers[0].FullName --verify-tag --notes-file $notes --title $tag --repo $env:GITHUB_REPOSITORY
+            } else {
+              gh release create $tag $installers[0].FullName --verify-tag --generate-notes --title $tag --repo $env:GITHUB_REPOSITORY
+            }
           }
           if ($LASTEXITCODE -ne 0) { throw "Could not publish installer for $tag" }

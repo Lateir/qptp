@@ -5,22 +5,24 @@ use tauri::{menu::{Menu, MenuItem, PredefinedMenuItem}, tray::{MouseButton, Mous
 mod extra_ipc;
 mod discovery;
 mod touch;
+mod protocol;
+mod sensor_trace;
 #[cfg(windows)]
 pub mod steamvr_install;
 
 const PORT: u16 = 27182;
 
 const HAPTIC_DURATION_MS: u16 = 2;
-const MIN_MODULE_VERSION_CODE: u64 = 9; // QPR3 and QPV1 are required.
-const MIN_MODULE_VERSION: &str = "v3.3";
-const CONTACT_MODULE_VERSION_CODE: u64 = 12; // QPR4 adds contact size and flag on request.
+const MIN_MODULE_VERSION_CODE: u64 = 12; // QPR4-capable module is required.
+const MIN_MODULE_VERSION: &str = "v3.6";
 const SIDES: [&str; 2] = ["left", "right"];
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
-struct UserConfig { transport: String, input_mode: String, press_threshold: f32, release_threshold: f32, haptic_amplitude: f32, language: String, steamvr_lifecycle: bool, steamvr_driver_mode: String, fusion_quest3: String, touchpad: touch::Settings }
+struct UserConfig { transport: String, input_mode: String, press_threshold: f32, release_threshold: f32, haptic_amplitude: f32, language: String, steamvr_lifecycle: bool, #[serde(default = "legacy_driver_mode")] steamvr_driver_mode: String, fusion_quest3: String, skeleton_input: bool, touchpad: touch::Settings }
+fn legacy_driver_mode()->String { "classic".into() }
 impl Default for UserConfig {
-    fn default()->Self { Self { transport:"lan".into(), input_mode:"touchpad".into(), press_threshold:0.30, release_threshold:0.20, haptic_amplitude:0.20, language:system_language().into(), steamvr_lifecycle:true, steamvr_driver_mode:"classic".into(), fusion_quest3:"ask".into(), touchpad:touch::Settings::default() } }
+    fn default()->Self { Self { transport:"lan".into(), input_mode:"touchpad".into(), press_threshold:0.30, release_threshold:0.20, haptic_amplitude:0.20, language:system_language().into(), steamvr_lifecycle:true, steamvr_driver_mode:"fusion".into(), fusion_quest3:"ask".into(), skeleton_input:false, touchpad:touch::Settings::default() } }
 }
 fn valid_mode(mode:&str)->bool {matches!(mode,"touchpad"|"button"|"two_buttons")}
 fn valid_driver_mode(mode:&str)->bool {matches!(mode,"classic"|"fusion")}
@@ -69,10 +71,12 @@ struct Snapshot {
     input_mode: String, press_threshold: f32, release_threshold: f32, haptic_amplitude: f32, language: String, left_buttons: [bool;2], right_buttons: [bool;2],
     steamvr_connected: bool, steamvr_lifecycle: bool, steamvr_driver_mode: String, fusion_quest3: String, steamvr_driver: extra_ipc::DriverReport,
     touchpad: touch::Settings, left_pad: touch::Output, right_pad: touch::Output, contact_size_available: bool,
+    skeleton_input: bool,
+    #[serde(skip)] sensor_received: Option<u64>,
     #[serde(skip)] engine: touch::Engine,
 }
 impl Default for Snapshot {
-    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"lan".into(), endpoint:None, protocol:None, module_version:None, minimum_module_version:MIN_MODULE_VERSION, module_update_required:false, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,release_threshold:0.20,haptic_amplitude:0.20,language:"ru".into(),left_buttons:[false;2],right_buttons:[false;2],steamvr_connected:false,steamvr_lifecycle:true,steamvr_driver_mode:"classic".into(),fusion_quest3:"ask".into(),steamvr_driver:extra_ipc::DriverReport::default(),touchpad:touch::Settings::default(),left_pad:touch::Output::default(),right_pad:touch::Output::default(),contact_size_available:false,engine:touch::Engine::default() } }
+    fn default() -> Self { Self { phase:"searching".into(), message:"Поиск устройства…".into(), transport:"lan".into(), endpoint:None, protocol:None, module_version:None, minimum_module_version:MIN_MODULE_VERSION, module_update_required:false, samples:0, left:Sensor::default(), right:Sensor::default(), status:None,input_mode:"touchpad".into(),press_threshold:0.30,release_threshold:0.20,haptic_amplitude:0.20,language:"ru".into(),left_buttons:[false;2],right_buttons:[false;2],steamvr_connected:false,steamvr_lifecycle:true,steamvr_driver_mode:"fusion".into(),fusion_quest3:"ask".into(),steamvr_driver:extra_ipc::DriverReport::default(),touchpad:touch::Settings::default(),left_pad:touch::Output::default(),right_pad:touch::Output::default(),contact_size_available:false,skeleton_input:false,sensor_received:None,engine:touch::Engine::default() } }
 }
 struct StreamState { snapshot: Mutex<Snapshot>, config_lock: Mutex<()>, generation: AtomicU64, adb_used: AtomicBool }
 type Shared = Arc<StreamState>;
@@ -178,10 +182,6 @@ fn read_exact_deadline(stream:&mut impl Read,bytes:&mut [u8],timeout:Duration,ca
     }
     Ok(())
 }
-fn sensor(b:&[u8])->Sensor{
-    // Module's Y axis is inverted relative to the pad; flip so 0 is the top.
-    Sensor{x:u16::from_le_bytes([b[0],b[1]]),y:255u16.saturating_sub(u16::from_le_bytes([b[2],b[3]])),force:f32_at(b,4),stylus:f32_at(b,8),trigger_proximity:f32_at(b,12),trigger_slide:f32_at(b,16),size:None,touch:None}
-}
 fn f32_at(b:&[u8],offset:usize)->f32{f32::from_le_bytes(b[offset..offset+4].try_into().unwrap())}
 // QPR4 side: x, y, force, size, stylus, proximity, slide, then the contact flag byte and 3 padding bytes.
 fn sensor4(b:&[u8])->Sensor{
@@ -189,8 +189,8 @@ fn sensor4(b:&[u8])->Sensor{
 }
 fn touch_raw(sensor:&Sensor)->touch::Raw{touch::Raw{x:sensor.x,y:sensor.y,force:sensor.force,size:sensor.size,touch:sensor.touch}}
 fn button_step(previous:[bool;2], sensor:&Sensor, mode:&str, press_threshold:f32, release_threshold:f32)->[bool;2]{
-    // Raw (0, 0) is no touch. The decoded Y axis is flipped, so idle is (0, 255).
-    if mode=="touchpad" || (sensor.x==0&&sensor.y==255) || !sensor.force.is_finite() || sensor.force<release_threshold {return [false;2]}
+    // The QPR4 contact flag is authoritative, even at a pad corner.
+    if mode=="touchpad" || sensor.touch!=Some(true) || !sensor.force.is_finite() || sensor.force<release_threshold {return [false;2]}
     if previous[0]||previous[1] {return previous} // Keep the chosen half until release.
     if sensor.force<press_threshold {return [false;2]}
     if mode=="two_buttons" {[sensor.y<128,sensor.y>=128]} else {[true,false]}
@@ -217,9 +217,11 @@ fn acknowledge_haptic(pending:&mut [Option<u32>;2],request_id:u32){
 fn read_frame(stream:&mut TcpStream, app:&AppHandle, state:&Shared, generation:u64)->io::Result<()>{
     let mut header=[0u8;4];let mut last_emit=Instant::now()-Duration::from_secs(1);let mut haptic_sequence=0u32;
     let mut pending_haptics:[Option<u32>;2]=[None,None];
+    let mut negotiation: Option<protocol::ContactNegotiation> = None;
     loop {
         if state.generation.load(Ordering::SeqCst)!=generation{return Ok(())}
-        read_exact_checked(stream,&mut header,state,generation)?;
+        let timeout=match &negotiation {Some(n)=>n.remaining()?,None=>Duration::from_secs(5)};
+        read_exact_deadline(stream,&mut header,timeout,||state.generation.load(Ordering::SeqCst)!=generation)?;
         match &header {
             b"QPV1"=>{
                 let mut size=[0u8;4];read_exact_checked(stream,&mut size,state,generation)?;
@@ -233,7 +235,9 @@ fn read_frame(stream:&mut TcpStream, app:&AppHandle, state:&Shared, generation:u
                 let required=code<MIN_MODULE_VERSION_CODE;
                 publish(app,state,|s|{s.module_version=Some(version);s.module_update_required=required});
                 if required {return Err(io::Error::new(io::ErrorKind::InvalidData,"Требуется обновление модуля"))}
-                if code>=CONTACT_MODULE_VERSION_CODE {haptic_sequence=haptic_sequence.wrapping_add(1);request_contact_frames(stream,haptic_sequence)?;}
+                if negotiation.is_some() {return Err(io::Error::new(io::ErrorKind::InvalidData,"Duplicate module version"))}
+                haptic_sequence=haptic_sequence.wrapping_add(1);request_contact_frames(stream,haptic_sequence)?;
+                negotiation=Some(protocol::ContactNegotiation::new(haptic_sequence));
             }
             b"QPR2"=>{
                 publish(app,state,|s|s.module_update_required=true);
@@ -242,7 +246,9 @@ fn read_frame(stream:&mut TcpStream, app:&AppHandle, state:&Shared, generation:u
             b"QPA1"=>{
                 let mut body=[0u8;12];read_exact_checked(stream,&mut body,state,generation)?;
                 let request_id=u32::from_le_bytes(body[..4].try_into().unwrap());
-                acknowledge_haptic(&mut pending_haptics,request_id);
+                let status=i32::from_le_bytes(body[4..8].try_into().unwrap());
+                let format_ack=match &mut negotiation {Some(n)=>n.acknowledge(request_id,status)?,None=>false};
+                if !format_ack {acknowledge_haptic(&mut pending_haptics,request_id);}
             }
             b"QPS1"=>{
                 let mut size=[0u8;4];read_exact_checked(stream,&mut size,state,generation)?;
@@ -251,17 +257,20 @@ fn read_frame(stream:&mut TcpStream, app:&AppHandle, state:&Shared, generation:u
                 let mut body=vec![0u8;size];read_exact_checked(stream,&mut body,state,generation)?;
                 let status:Value=serde_json::from_slice(&body).map_err(io::Error::other)?;
                 if state.generation.load(Ordering::SeqCst)!=generation {return Ok(())}
-                publish(app,state,|s|{s.status=Some(status);s.phase="connected".into();s.message="Поток сенсоров активен".into();if s.protocol.is_none(){s.protocol=Some("QPR3 / QPS1".into())}if !controller_connected(s,"left"){s.left_buttons=[false;2]}if !controller_connected(s,"right"){s.right_buttons=[false;2]}});
+                publish(app,state,|s|{s.status=Some(status);if s.contact_size_available {s.phase="connected".into();s.message="Поток сенсоров активен".into();}if !controller_connected(s,"left"){s.left_buttons=[false;2]}if !controller_connected(s,"right"){s.right_buttons=[false;2]}});
             }
             b"QPR3"|b"QPR4"=>{
                 let contact=&header==b"QPR4";
                 let mut body=[0u8;68];let body=&mut body[..if contact{68}else{52}];read_exact_checked(stream,body,state,generation)?;
                 if state.generation.load(Ordering::SeqCst)!=generation {return Ok(())}
-                let (left,right)=if contact{(sensor4(&body[12..40]),sensor4(&body[40..68]))}else{(sensor(&body[12..32]),sensor(&body[32..52]))};
+                let Some(n)=&negotiation else {return Err(io::Error::new(io::ErrorKind::InvalidData,"Sensor frame before module version"))};
+                if !n.sample(contact)? {continue}
+                let (left,right)=(sensor4(&body[12..40]),sensor4(&body[40..68]));
+                sensor_trace::sample(touch::now_us(),&left,&right);
                 let mut pulses=[false;2];let mut amplitude=0u8;
                 if let Ok(mut s)=state.snapshot.lock(){
                     let previous=(s.left_buttons,s.right_buttons);let now=touch::now_us();
-                    s.left=left;s.right=right;s.samples+=1;s.phase="connected".into();s.message="Поток сенсоров активен".into();s.protocol=Some(if contact{"QPR4 / QPS1"}else{"QPR3 / QPS1"}.into());s.contact_size_available=contact;
+                    s.left=left;s.right=right;s.sensor_received=Some(now);s.samples+=1;s.phase="connected".into();s.message="Поток сенсоров активен".into();s.protocol=Some("QPR4 / QPS1".into());s.contact_size_available=true;
                     s.left_buttons=if s.status.is_none()||controller_connected(&s,"left"){button_step(previous.0,&s.left,&s.input_mode,s.press_threshold,s.release_threshold)}else{[false;2]};
                     s.right_buttons=if s.status.is_none()||controller_connected(&s,"right"){button_step(previous.1,&s.right,&s.input_mode,s.press_threshold,s.release_threshold)}else{[false;2]};
                     let (left,right)=(touch_raw(&s.left),touch_raw(&s.right));
@@ -288,7 +297,7 @@ fn worker(app:AppHandle,state:Shared,generation:u64,transport:String){
     loop {
         if state.generation.load(Ordering::SeqCst)!=generation {break}
         let update_required=state.snapshot.lock().map(|s|s.module_update_required).unwrap_or(false);
-        if !update_required {publish(&app,&state,|s|{s.phase="searching".into();s.message=if transport=="usb"{"Поиск Quest через ADB…".into()}else{"Поиск Quest в локальной сети…".into()};s.status=None;s.endpoint=None;s.protocol=None;s.module_version=None;s.left=Sensor::default();s.right=Sensor::default();s.left_buttons=[false;2];s.right_buttons=[false;2]});}
+        if !update_required {publish(&app,&state,|s|{s.phase="searching".into();s.message=if transport=="usb"{"Поиск Quest через ADB…".into()}else{"Поиск Quest в локальной сети…".into()};s.status=None;s.contact_size_available=false;s.endpoint=None;s.protocol=None;s.module_version=None;s.left=Sensor::default();s.right=Sensor::default();s.left_buttons=[false;2];s.right_buttons=[false;2]});}
         let endpoint=if transport=="usb"{
             match adb_forward(&app,&state){Ok((adb,owns))=>{if owns{owned_forward=Some(adb)};Ok(format!("127.0.0.1:{PORT}"))},Err(e)=>Err(e)}
         }else{discovery::discover(||state.generation.load(Ordering::SeqCst)!=generation).map_err(|e|e.to_string())};
@@ -344,7 +353,7 @@ fn write_user_config_file(file:&Path,config:&UserConfig)->Result<(),String>{
 fn load_user_config(app:&AppHandle)->UserConfig{
     let mut config=config_file(app).ok().and_then(|f|read_user_config_file(&f)).unwrap_or_else(||{
         let mut config=UserConfig::default();
-        if let Some(transport)=transport_file(app).and_then(|f|std::fs::read_to_string(f).ok()){config.transport=transport.trim().into()}
+        if let Some(transport)=transport_file(app).and_then(|f|std::fs::read_to_string(f).ok()){config.transport=transport.trim().into();config.steamvr_driver_mode=legacy_driver_mode()}
         config
     });
     if config.transport!="usb"&&config.transport!="lan"{config.transport="lan".into()}
@@ -363,10 +372,10 @@ fn save_user_config(app:&AppHandle,config:&UserConfig)->Result<(),String>{
     let file=config_file(app)?;
     write_user_config_file(&file,config)
 }
-fn config_from_snapshot(s:&Snapshot)->UserConfig{UserConfig{transport:s.transport.clone(),input_mode:s.input_mode.clone(),press_threshold:s.press_threshold,release_threshold:s.release_threshold,haptic_amplitude:s.haptic_amplitude,language:s.language.clone(),steamvr_lifecycle:s.steamvr_lifecycle,steamvr_driver_mode:s.steamvr_driver_mode.clone(),fusion_quest3:s.fusion_quest3.clone(),touchpad:s.touchpad.clone()}}
+fn config_from_snapshot(s:&Snapshot)->UserConfig{UserConfig{transport:s.transport.clone(),input_mode:s.input_mode.clone(),press_threshold:s.press_threshold,release_threshold:s.release_threshold,haptic_amplitude:s.haptic_amplitude,language:s.language.clone(),steamvr_lifecycle:s.steamvr_lifecycle,steamvr_driver_mode:s.steamvr_driver_mode.clone(),fusion_quest3:s.fusion_quest3.clone(),skeleton_input:s.skeleton_input,touchpad:s.touchpad.clone()}}
 fn apply_config(s:&mut Snapshot,config:UserConfig){
     s.transport=config.transport;s.input_mode=config.input_mode;s.press_threshold=config.press_threshold;s.release_threshold=config.release_threshold;s.haptic_amplitude=config.haptic_amplitude;
-    s.language=config.language;s.steamvr_lifecycle=config.steamvr_lifecycle;s.steamvr_driver_mode=config.steamvr_driver_mode;s.fusion_quest3=config.fusion_quest3;s.touchpad=config.touchpad;
+    s.language=config.language;s.steamvr_lifecycle=config.steamvr_lifecycle;s.steamvr_driver_mode=config.steamvr_driver_mode;s.fusion_quest3=config.fusion_quest3;s.skeleton_input=config.skeleton_input;s.touchpad=config.touchpad;
 }
 fn start_worker(app:&AppHandle,state:&Shared,transport:String){
     let generation=state.generation.fetch_add(1,Ordering::SeqCst)+1;
@@ -442,6 +451,13 @@ fn set_steamvr_driver_mode(app:AppHandle,state:State<Shared>,mode:String)->Resul
     if config.steamvr_driver_mode==mode{return Ok(())}
     config.steamvr_driver_mode=mode.clone();save_user_config(&app,&config)?;
     publish(&app,state.inner(),|s|s.steamvr_driver_mode=mode);Ok(())
+}
+#[tauri::command]
+fn set_skeleton_input(app:AppHandle,state:State<Shared>,enabled:bool)->Result<(),String>{
+    let _guard=state.config_lock.lock().map_err(|e|e.to_string())?;
+    let mut config=state.snapshot.lock().map(|s|config_from_snapshot(&s)).map_err(|e|e.to_string())?;
+    config.skeleton_input=enabled;save_user_config(&app,&config)?;
+    publish(&app,state.inner(),|s|s.skeleton_input=enabled);Ok(())
 }
 #[tauri::command]
 fn set_fusion_quest3(app:AppHandle,state:State<Shared>,answer:String)->Result<(),String>{
@@ -575,7 +591,7 @@ pub fn run(){
             WindowEvent::CloseRequested{..}=>window.app_handle().exit(0),
             _=>{}
         })
-        .invoke_handler(tauri::generate_handler![get_stream_state,set_transport,set_input_mode,set_button_thresholds,set_haptic_amplitude,set_language,set_steamvr_lifecycle,set_steamvr_driver_mode,set_fusion_quest3,set_touchpad_settings,open_module_page,open_release_page])
+        .invoke_handler(tauri::generate_handler![get_stream_state,set_transport,set_input_mode,set_button_thresholds,set_haptic_amplitude,set_language,set_steamvr_lifecycle,set_steamvr_driver_mode,set_skeleton_input,set_fusion_quest3,set_touchpad_settings,open_module_page,open_release_page])
         .build(tauri::generate_context!()).expect("tauri application error")
         .run(|app,event|match event{
             // Destroying the last window (tray mode) must not quit the app; explicit exit passes a code.
@@ -628,7 +644,7 @@ mod tests {
         assert_eq!(&header,b"QPR3");sender.join().unwrap();
         assert_eq!(read_exact_deadline(&mut client,&mut header,Duration::from_secs(1),||true).unwrap_err().kind(),io::ErrorKind::Interrupted);
     }
-    fn sample(y:u16,force:f32)->Sensor{Sensor{x:80,y,force,..Sensor::default()}}
+    fn sample(y:u16,force:f32)->Sensor{Sensor{x:80,y,force,touch:Some(true),..Sensor::default()}}
     #[test]
     fn tray_shows_both_controller_batteries_on_one_line(){
         let snapshot=Snapshot{phase:"connected".into(),status:Some(serde_json::json!({
@@ -664,6 +680,9 @@ mod tests {
     #[test]
     fn config_defaults_missing_fields(){
         let config:UserConfig=serde_json::from_str("{}").unwrap();
+        assert!(!config.skeleton_input);
+        assert_eq!(UserConfig::default().steamvr_driver_mode,"fusion");
+        assert!(!UserConfig::default().skeleton_input);
         assert_eq!(config.transport,"lan");
         assert_eq!(config.input_mode,"touchpad");
         assert_eq!(config.press_threshold,0.30);
@@ -673,6 +692,14 @@ mod tests {
         // Configs saved before Fusion keep the Treadmill driver and an identity touchpad.
         let old:UserConfig=serde_json::from_str(r#"{"transport":"usb","inputMode":"button","steamvrLifecycle":false}"#).unwrap();
         assert_eq!(old.steamvr_driver_mode,"classic");
+        assert!(!old.skeleton_input);
+        for mode in ["classic","fusion"] {
+            for enabled in [false,true] {
+                let saved:UserConfig=serde_json::from_value(serde_json::json!({"steamvrDriverMode":mode,"skeletonInput":enabled})).unwrap();
+                assert_eq!(saved.steamvr_driver_mode,mode);
+                assert_eq!(saved.skeleton_input,enabled);
+            }
+        }
         assert_eq!(old.fusion_quest3,"ask");
         assert_eq!(old.touchpad,touch::Settings::default());
     }
@@ -715,7 +742,7 @@ mod tests {
         let dir=std::env::temp_dir().join(format!("qptp-config-test-{}-{}",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         let file=dir.join("config.json");
         let touchpad=touch::Settings{style:"swipe".into(),swipe_gain:0.5,..touch::Settings::default()};
-        let config=UserConfig{transport:"lan".into(),input_mode:"two_buttons".into(),press_threshold:0.45,release_threshold:0.12,haptic_amplitude:0.65,language:"ja".into(),steamvr_lifecycle:false,steamvr_driver_mode:"fusion".into(),fusion_quest3:"pro".into(),touchpad:touchpad.clone()};
+        let config=UserConfig{transport:"lan".into(),input_mode:"two_buttons".into(),press_threshold:0.45,release_threshold:0.12,haptic_amplitude:0.65,language:"ja".into(),steamvr_lifecycle:false,steamvr_driver_mode:"fusion".into(),fusion_quest3:"pro".into(),skeleton_input:false,touchpad:touchpad.clone()};
         write_user_config_file(&file,&config).unwrap();
         let loaded=read_user_config_file(&file).unwrap();
         assert_eq!(loaded.transport,config.transport);
@@ -725,6 +752,7 @@ mod tests {
         assert_eq!(loaded.haptic_amplitude,config.haptic_amplitude);
         assert_eq!(loaded.language,config.language);
         assert!(!loaded.steamvr_lifecycle);
+        assert!(!loaded.skeleton_input);
         assert_eq!(std::fs::read_to_string(dir.join("steamvr_lifecycle")).unwrap(),"0");
         assert_eq!(loaded.touchpad,touchpad);
         assert_eq!(std::fs::read_to_string(dir.join("steamvr_driver_mode")).unwrap(),"fusion");

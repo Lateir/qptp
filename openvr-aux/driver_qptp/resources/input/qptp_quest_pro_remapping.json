@@ -43,7 +43,7 @@
       ]
     },
     {
-      "priority": 95,
+      "priority": 105,
       "from_controller_type": "oculus_touch",
       "simulate_controller_type": true,
       "simulate_render_model": false,

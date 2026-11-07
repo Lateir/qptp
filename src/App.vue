@@ -12,9 +12,9 @@ import { defaultTouchpad, idlePad, type Calibration, type DriverMode, type Drive
 type Mode = 'usb' | 'lan'
 type InputMode = 'touchpad' | 'button' | 'two_buttons'
 type Side = { x:number; y:number; force:number; stylus:number; triggerProximity:number; triggerSlide:number; size?:number|null; touch?:boolean|null }
-type Snapshot = { phase:string; message:string; transport:Mode; endpoint?:string; protocol?:string; moduleVersion?:{version:string;versionCode:number}; minimumModuleVersion:string; moduleUpdateRequired:boolean; samples:number; left:Side; right:Side; status?:Record<string,unknown>; inputMode:InputMode; pressThreshold:number; releaseThreshold:number; hapticAmplitude:number; language:Language; leftButtons:[boolean,boolean]; rightButtons:[boolean,boolean]; steamvrConnected:boolean; steamvrLifecycle:boolean; steamvrDriverMode:DriverMode; fusionQuest3:Quest3Answer; steamvrDriver:DriverReport; touchpad:TouchpadSettings; leftPad:PadOutput; rightPad:PadOutput; contactSizeAvailable:boolean }
+type Snapshot = { phase:string; message:string; transport:Mode; endpoint?:string; protocol?:string; moduleVersion?:{version:string;versionCode:number}; minimumModuleVersion:string; moduleUpdateRequired:boolean; samples:number; left:Side; right:Side; status?:Record<string,unknown>; inputMode:InputMode; pressThreshold:number; releaseThreshold:number; hapticAmplitude:number; language:Language; leftButtons:[boolean,boolean]; rightButtons:[boolean,boolean]; steamvrConnected:boolean; steamvrLifecycle:boolean; steamvrDriverMode:DriverMode; skeletonInput:boolean; fusionQuest3:Quest3Answer; steamvrDriver:DriverReport; touchpad:TouchpadSettings; leftPad:PadOutput; rightPad:PadOutput; contactSizeAvailable:boolean }
 const zero={x:0,y:0,force:0,stylus:0,triggerProximity:0,triggerSlide:0}
-const snap=ref<Snapshot>({phase:'searching',message:'Поиск устройства…',transport:'lan',minimumModuleVersion:'v3.3',moduleUpdateRequired:false,samples:0,left:zero,right:zero,inputMode:'touchpad',pressThreshold:0.30,releaseThreshold:0.20,hapticAmplitude:0.20,language:'ru',leftButtons:[false,false],rightButtons:[false,false],steamvrConnected:false,steamvrLifecycle:true,steamvrDriverMode:'classic',fusionQuest3:'ask',steamvrDriver:{mode:null,adopted:[false,false],quest3:[false,false],conflict:null},touchpad:defaultTouchpad(),leftPad:idlePad(),rightPad:idlePad(),contactSizeAvailable:false})
+const snap=ref<Snapshot>({phase:'searching',message:'Поиск устройства…',transport:'lan',minimumModuleVersion:'v3.6',moduleUpdateRequired:false,samples:0,left:zero,right:zero,inputMode:'touchpad',pressThreshold:0.30,releaseThreshold:0.20,hapticAmplitude:0.20,language:'ru',leftButtons:[false,false],rightButtons:[false,false],steamvrConnected:false,steamvrLifecycle:true,steamvrDriverMode:'fusion',skeletonInput:false,fusionQuest3:'ask',steamvrDriver:{mode:null,adopted:[false,false],quest3:[false,false],conflict:null,skeleton:[null,null]},touchpad:defaultTouchpad(),leftPad:idlePad(),rightPad:idlePad(),contactSizeAvailable:false})
 const mode=ref<Mode>('lan'),tab=ref<'sensors'|'mode'|'status'|'settings'|'updates'|'calibration'>('status'),busy=ref(false)
 const inputBusy=ref(false),inputError=ref('')
 const linkError=ref(''),settingsError=ref(''),languageBusy=ref(false),lifecycleBusy=ref(false),driverBusy=ref(false)
@@ -49,6 +49,19 @@ async function changeSteamvrLifecycle(event:Event){const enabled=(event.target a
 async function saveTouchpad(settings:TouchpadSettings){inputError.value='';if(!isTauri()){snap.value={...snap.value,touchpad:settings};return true}inputBusy.value=true;try{await invoke('set_touchpad_settings',{settings});return true}catch(e){inputError.value=String(e);return false}finally{inputBusy.value=false}}
 async function saveCalibration(calibration:Calibration){if(await saveTouchpad({...snap.value.touchpad,calibration}))tab.value='mode'}
 async function selectDriverMode(next:DriverMode){if(next===snap.value.steamvrDriverMode)return;settingsError.value='';driverBusy.value=true;try{if(isTauri())await invoke('set_steamvr_driver_mode',{mode:next});snap.value={...snap.value,steamvrDriverMode:next}}catch{settingsError.value=t('saveError')}finally{driverBusy.value=false}}
+async function changeSkeleton(event:Event){
+  const control=event.target as HTMLInputElement, enabled=control.checked
+  settingsError.value='';driverBusy.value=true
+  try{if(isTauri())await invoke('set_skeleton_input',{enabled});snap.value={...snap.value,skeletonInput:enabled}}
+  catch{settingsError.value=t('saveError');control.checked=snap.value.skeletonInput}
+  finally{driverBusy.value=false}
+}
+function skeletonStatus(side:0|1){
+  if(!snap.value.skeletonInput)return t('skeletonDisabled')
+  if(!snap.value.steamvrConnected||snap.value.steamvrDriver.mode!=='fusion')return t('skeletonWaiting')
+  const status=snap.value.steamvrDriver.skeleton?.[side]
+  return t(status==='active'?'skeletonActive':status==='waiting'?'skeletonWaiting':status==='disabled'?'skeletonDisabled':status==='error'?'skeletonError':'skeletonUnavailable')
+}
 async function answerQuest3(answer:Quest3Answer){settingsError.value='';driverBusy.value=true;try{if(isTauri())await invoke('set_fusion_quest3',{answer});snap.value={...snap.value,fusionQuest3:answer}}catch{settingsError.value=t('saveError')}finally{driverBusy.value=false}}
 // Fusion found controllers with a Quest 3 model (Virtual Desktop can report Quest Pro hardware that way): ask once.
 const quest3Seen=computed(()=>snap.value.steamvrConnected&&snap.value.steamvrDriver.mode==='fusion'&&snap.value.steamvrDriver.quest3.some(Boolean))
@@ -133,6 +146,10 @@ onUnmounted(()=>{unlisten?.();if(updateTimer)clearInterval(updateTimer)})
             <button type="button" :class="{active:snap.steamvrDriverMode==='fusion'}" :aria-pressed="snap.steamvrDriverMode==='fusion'" :disabled="driverBusy" @click="selectDriverMode('fusion')"><b>Fusion <i class="beta-chip">BETA</i></b><small>{{t('driverFusionNote')}}</small></button>
           </div>
           <p class="driver-status" :class="driverStatus.tone">{{driverStatus.text}}<button v-if="quest3Seen&&snap.fusionQuest3!=='ask'" type="button" class="inline-link" :disabled="driverBusy" @click="answerQuest3('ask')">{{t('change')}}</button></p>
+        </div>
+        <div v-if="snap.steamvrDriverMode==='fusion'" class="skeleton-control">
+          <label class="steamvr-lifecycle"><span :title="t('fingerTrackingHint')">{{t('fingerTracking')}}</span><input type="checkbox" role="switch" :checked="snap.skeletonInput" :disabled="driverBusy" @change="changeSkeleton"/></label>
+          <p class="skeleton-status" aria-live="polite">{{t('left')}}: {{skeletonStatus(0)}} · {{t('right')}}: {{skeletonStatus(1)}}</p>
         </div>
         <button type="button" class="module-link" @click="openModule">
           <b>{{t('moduleRequired')}}</b>

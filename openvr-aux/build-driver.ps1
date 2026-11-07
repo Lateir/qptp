@@ -9,6 +9,9 @@ if (!(Test-Path -LiteralPath $vcvars)) { throw "vcvars64.bat is missing from $in
 $output = Join-Path $root 'driver_qptp\bin\win64'
 $intermediate = Join-Path $root 'build-msvc'
 New-Item -ItemType Directory -Force -Path $output,$intermediate | Out-Null
-$command = 'call "' + $vcvars + '" >nul && cd /d "' + $intermediate + '" && cl /nologo /std:c++17 /EHsc /MD /O2 /LD /I"' + (Join-Path $root 'vendor\openvr') + '" "' + (Join-Path $root 'src\driver.cpp') + '" "' + (Join-Path $root 'src\debug_udp.cpp') + '" "' + (Join-Path $root 'src\fusion.cpp') + '" ws2_32.lib /link /OUT:"' + (Join-Path $output 'driver_qptp.dll') + '"'
+$sources = @('src/driver.cpp', 'src/debug_udp.cpp', 'src/fusion.cpp', 'src/skeletal_driver.cpp', 'src/skeletal_mapping.cpp', 'vendor/hand_simulation/hand_simulation.cpp') | ForEach-Object { '"' + (Join-Path $root $_) + '"' }
+$cSources = @('vendor/minhook/src/buffer.c', 'vendor/minhook/src/hook.c', 'vendor/minhook/src/trampoline.c', 'vendor/minhook/src/hde/hde64.c') | ForEach-Object { '"' + (Join-Path $root $_) + '"' }
+$command = 'call "' + $vcvars + '" >nul && cd /d "' + $intermediate + '" && cl /nologo /TC /MD /O2 /c /DWIN32_LEAN_AND_MEAN /DNOMINMAX ' + ($cSources -join ' ') + ' && cl /nologo /std:c++17 /EHsc /MD /O2 /LD /DWIN32_LEAN_AND_MEAN /DNOMINMAX /I"' + (Join-Path $root 'vendor/openvr') + '" /I"' + (Join-Path $root 'vendor/hand_simulation') + '" /I"' + (Join-Path $root 'vendor/minhook/include') + '" ' + ($sources -join ' ') + ' buffer.obj hook.obj trampoline.obj hde64.obj ws2_32.lib /link /OUT:"' + (Join-Path $output 'driver_qptp.dll') + '"'
+
 cmd.exe /d /s /c $command
 if ($LASTEXITCODE -ne 0) { throw "Driver build failed: $LASTEXITCODE" }

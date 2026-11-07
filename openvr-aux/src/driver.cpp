@@ -29,7 +29,21 @@ static std::string AppFlag(const wchar_t* name) {
     return value;
 }
 static bool AutoLaunchEnabled() { return AppFlag(L"steamvr_lifecycle") != "0"; }
-static bool FusionRequested() { return AppFlag(L"steamvr_driver_mode") == "fusion"; }
+static bool FusionRequested() {
+    const auto mode=AppFlag(L"steamvr_driver_mode");
+    if(!mode.empty())return mode=="fusion";
+    // SteamVR may start the driver before the desktop app has ever run. Only a
+    // fresh installation defaults to Fusion; legacy config/transport implies Classic.
+    wchar_t roaming[MAX_PATH]{};
+    const DWORD length=GetEnvironmentVariableW(L"APPDATA",roaming,MAX_PATH);
+    if(!length || length>=MAX_PATH)return false;
+    const auto dir=std::filesystem::path(roaming)/L"dev.lateir.qptp";
+    std::error_code error;
+    const bool config=std::filesystem::exists(dir/L"config.json",error);
+    if(error)return false;
+    const bool transport=std::filesystem::exists(dir/L"transport",error);
+    return !error && !config && !transport;
+}
 static bool Quest3IsPro() { return AppFlag(L"steamvr_fusion_quest3") == "pro"; }
 static void LaunchInstalledApp() {
     if (!AutoLaunchEnabled()) {

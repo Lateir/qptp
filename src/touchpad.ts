@@ -5,7 +5,7 @@ export type TouchpadSettings = { style:TouchpadStyle; clickPress:number; clickRe
 export type Contact = 'none' | 'pending' | 'active' | 'rejected'
 export type PadOutput = { touch:boolean; click:boolean; x:number; y:number; force:number; contact:Contact; fingerX:number; fingerY:number; anchorX:number; anchorY:number }
 export type DriverMode = 'classic' | 'fusion'
-export type DriverReport = { mode:DriverMode | 'fallback' | null; adopted:[boolean,boolean]; quest3:[boolean,boolean]; conflict:string | null }
+export type DriverReport = { mode:DriverMode | 'fallback' | null; adopted:[boolean,boolean]; quest3:[boolean,boolean]; conflict:string | null; skeleton:[string|null,string|null] }
 export type Quest3Answer = 'ask' | 'pro' | 'ignore'
 
 export const defaultCalibration=():Calibration=>({xMin:0,xMax:255,yMin:0,yMax:255,forceLow:0,forceHigh:1,rotationLeft:0,rotationRight:0})

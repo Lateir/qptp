@@ -1,8 +1,10 @@
 // Controller wrapping follows QFTPlus src/steamvr/driver.cpp (MIT, QproFaceTracking contributors).
 #include "fusion.hpp"
+#include "skeletal_driver.hpp"
 #include <openvr_driver.h>
 #include <windows.h>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -76,6 +78,7 @@ void Adopt(uint32_t id) {
     Scalar(c, "/input/trigger_proximity/value", &hand.proximity, VRScalarUnits_NormalizedOneSided);
     Scalar(c, "/input/trigger_slide/value", &hand.slide, VRScalarUnits_NormalizedOneSided);
     { std::lock_guard<std::mutex> hold(g_lock); g_hands[side] = hand; }
+    skeleton::Adopt(c, side);
     std::snprintf(line, sizeof(line), "[qptp] Fusion adopted %s %s%s", side ? "right" : "left", model.c_str(), quest3 ? " as Quest Pro" : ""); Log(line);
 }
 
@@ -93,11 +96,15 @@ public:
         const auto container = VRProperties()->TrackedDeviceToPropertyContainer(id_);
         { std::lock_guard<std::mutex> hold(g_lock); for (auto& hand : g_hands) if (hand.container == container) hand = Hand{}; }
         id_ = k_unTrackedDeviceIndexInvalid;
+        skeleton::Remove(container);
         inner_->Deactivate();
     }
     void EnterStandby() override { inner_->EnterStandby(); }
     void* GetComponent(const char* name) override { return inner_->GetComponent(name); }
-    void DebugRequest(const char* request, char* response, uint32_t size) override { inner_->DebugRequest(request, response, size); }
+    void DebugRequest(const char* request, char* response, uint32_t size) override {
+        if(request && std::strcmp(request,"qptp_skeleton")==0 && skeleton::Debug(VRProperties()->TrackedDeviceToPropertyContainer(id_),response,size))return;
+        inner_->DebugRequest(request, response, size);
+    }
     DriverPose_t GetPose() override { return inner_->GetPose(); }
 };
 
@@ -130,7 +137,12 @@ bool Start(bool quest3_is_pro) {
     if (host == nullptr) return false;
     g_slot = *reinterpret_cast<void***>(host);
     g_added = reinterpret_cast<AddedFn>(g_slot[0]);
-    if (!Patch(reinterpret_cast<void*>(&Added))) { g_slot = nullptr; g_added = nullptr; return false; }
+    EVRInitError legacy_error=VRInitError_None;
+    auto* legacy=static_cast<IVRDriverInput*>(VRDriverContext()->GetGenericInterface("IVRDriverInput_003", &legacy_error));
+    EVRInitError latest_error=VRInitError_None;
+    auto* latest=static_cast<IVRDriverInput*>(VRDriverContext()->GetGenericInterface("IVRDriverInput_005", &latest_error));
+    if (!skeleton::Start(VRDriverInput(), &Log, legacy_error==VRInitError_None?legacy:nullptr,latest_error==VRInitError_None?latest:nullptr)) Log("[qptp] Skeleton input hook unavailable; Fusion pad remains active");
+    if (!Patch(reinterpret_cast<void*>(&Added))) { skeleton::Stop(); g_slot = nullptr; g_added = nullptr; return false; }
     Log("[qptp] Fusion (beta) waiting for Quest Pro controllers");
     return true;
 }
@@ -138,12 +150,14 @@ bool Start(bool quest3_is_pro) {
 void Stop() {
     if (g_slot != nullptr && g_slot[0] == reinterpret_cast<void*>(&Added)) Patch(reinterpret_cast<void*>(g_added));
     g_slot = nullptr;
+    skeleton::Stop();
     std::lock_guard<std::mutex> hold(g_lock);
     for (auto& hand : g_hands) hand = Hand{};
     g_shims.clear();
 }
 
 void RunFrame(const InputState& state) {
+    skeleton::Frame(state);
     Hand hands[2];
     { std::lock_guard<std::mutex> hold(g_lock); hands[0] = g_hands[0]; hands[1] = g_hands[1]; }
     IVRDriverInput* input = VRDriverInput();
@@ -175,6 +189,6 @@ void RunFrame(const InputState& state) {
 std::string Report() {
     std::lock_guard<std::mutex> hold(g_lock);
     const bool left = g_hands[0].container != k_ulInvalidPropertyContainer, right = g_hands[1].container != k_ulInvalidPropertyContainer;
-    return std::string("left=") + (left ? "1" : "0") + " right=" + (right ? "1" : "0") + " q3left=" + (g_quest3[0] ? "1" : "0") + " q3right=" + (g_quest3[1] ? "1" : "0") + " conflict=" + (g_conflict ? "qftplus" : "none");
+    return std::string("left=") + (left ? "1" : "0") + " right=" + (right ? "1" : "0") + " q3left=" + (g_quest3[0] ? "1" : "0") + " q3right=" + (g_quest3[1] ? "1" : "0") + " conflict=" + (g_conflict ? "qftplus" : "none") + skeleton::Report();
 }
 }

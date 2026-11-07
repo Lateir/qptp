@@ -1,11 +1,12 @@
 #include "debug_udp.hpp"
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 namespace qptp {
-DebugUdpInputSource::DebugUdpInputSource() {
+DebugUdpInputSource::DebugUdpInputSource(unsigned short port) {
     WSADATA data{};
     if (WSAStartup(MAKEWORD(2, 2), &data) != 0) return;
     winsock_ = true;
@@ -16,10 +17,15 @@ DebugUdpInputSource::DebugUdpInputSource() {
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    address.sin_port = htons(39571);
+    address.sin_port = htons(port);
     if (bind(socket_, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
         closesocket(socket_); socket_ = INVALID_SOCKET;
     }
+}
+unsigned short DebugUdpInputSource::local_port() const {
+    sockaddr_in address{};int length=sizeof(address);
+    if(getsockname(socket_,reinterpret_cast<sockaddr*>(&address),&length)!=0)return 0;
+    return ntohs(address.sin_port);
 }
 DebugUdpInputSource::~DebugUdpInputSource() {
     if (socket_ != INVALID_SOCKET) closesocket(socket_);
@@ -27,6 +33,12 @@ DebugUdpInputSource::~DebugUdpInputSource() {
 }
 bool DebugUdpInputSource::Poll(InputState& state) {
     if (!ready()) return false;
+    const auto now=std::chrono::steady_clock::now();
+    if(last_poll_!=std::chrono::steady_clock::time_point{}){
+        const float elapsed=std::chrono::duration<float,std::milli>(now-last_poll_).count();
+        state.left.finger.age_ms+=elapsed;state.right.finger.age_ms+=elapsed;
+    }
+    last_poll_=now;
     bool received = false;
     char buffer[2049];
     for (;;) {
@@ -39,6 +51,8 @@ bool DebugUdpInputSource::Poll(InputState& state) {
             reinterpret_cast<sockaddr*>(&sender), sender_length);
         buffer[length] = 0;
         received = true;
+        // Skeleton extension is opt-in per datagram; an older app must not retain old fingers.
+        state.skeleton_enabled=false;state.left.finger={};state.right.finger={};
         std::string packet(buffer, length);
         size_t start = 0;
         while (start < packet.size()) {
@@ -50,11 +64,23 @@ bool DebugUdpInputSource::Poll(InputState& state) {
                 const auto value = line.substr(equal + 1);
                 char* tail = nullptr;
                 const float number = std::strtof(value.c_str(), &tail);
-                if (tail != value.c_str() && *tail == 0) {
+                if (tail != value.c_str() && *tail == 0 && std::isfinite(number)) {
                     const auto two = std::clamp(number, -1.f, 1.f);
                     const auto one = std::clamp(number, 0.f, 1.f);
                     const bool on = number != 0;
-                    if (key == "left_pad_x") state.left.pad.x = two;
+                    if (key == "skeleton_enabled") state.skeleton_enabled = on;
+                    else if (key.rfind("left_finger_",0)==0 || key.rfind("right_finger_",0)==0) {
+                        auto& f = key.rfind("left_",0)==0 ? state.left.finger : state.right.finger;
+                        const auto field = key.substr(key.find("finger_")+7);
+                        if (field == "valid") f.valid = on;
+                        else if (field == "age_ms") f.age_ms = (std::max)(0.f,number);
+                        else if (field == "contact") f.contact = on;
+                        else if (field == "x") f.x = two;
+                        else if (field == "y") f.y = two;
+                        else if (field == "proximity") f.proximity = number;
+                        else if (field == "slide") f.slide = number;
+                    }
+                    else if (key == "left_pad_x") state.left.pad.x = two;
                     else if (key == "left_pad_y") state.left.pad.y = two;
                     else if (key == "left_pad_touch") state.left.pad.touch = on;
                     else if (key == "left_pad_force") state.left.pad.force = one;

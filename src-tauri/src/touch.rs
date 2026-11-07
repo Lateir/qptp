@@ -203,8 +203,8 @@ mod mouse { pub fn moved(_: i32, _: i32) {} pub fn button(_: bool) {} }
 pub struct Engine { pads: [Pad; 2], cursors: [Cursor; 2], pub last_sent: u64 }
 impl Engine {
     pub fn feed(&mut self, side: usize, raw: Raw, now: u64, k: &Settings) {
-        // Without the module's contact flag, raw (0, 0) is no touch; the decoded Y axis is flipped, so idle is (0, 255).
-        let down = raw.touch.unwrap_or(!(raw.x == 0 && raw.y == 255));
+        // QPR4 contact is authoritative, including touches at the coordinate origin.
+        let down = raw.touch.unwrap_or(false);
         let (x, y) = normalize(&k.calibration, side, raw.x, raw.y);
         self.pads[side].feed(x, y, force_curve(raw.force, &k.calibration), raw.size, down, now, k);
     }
@@ -258,7 +258,7 @@ mod tests {
         // An active contact that flattens for 60 ms becomes a resting thumb.
         for (i, t) in [60_000u64, 70_000, 130_000].into_iter().enumerate() { e.feed(0, raw(128, 128, 0.2, Some(90.0)), t, &k); if i < 2 { assert!(e.step(0, t, &k, true).touch) } }
         assert_eq!(e.step(0, 130_000, &k, true).contact, Contact::Rejected);
-        // Without a size (QPR3) or with rejection off, every touch is active at once.
+        // Without a size or with rejection off, every explicit contact is active at once.
         let mut e = Engine::default();
         e.feed(0, raw(128, 128, 0.2, None), 0, &k);
         assert!(e.step(0, 0, &k, true).touch);

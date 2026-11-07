@@ -1,0 +1,11 @@
+{
+  "controller_type": "qptp_quest_pro",
+  "bindings": {
+    "/actions/check": {
+      "skeleton": [
+        {"output": "/actions/check/in/left", "path": "/user/hand/left/input/skeleton/left"},
+        {"output": "/actions/check/in/right", "path": "/user/hand/right/input/skeleton/right"}
+      ]
+    }
+  }
+}
