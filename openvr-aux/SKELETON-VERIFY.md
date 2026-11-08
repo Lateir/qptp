@@ -96,3 +96,13 @@ updates even when `GetSkeletalActionData` continues reporting an active action.
 Local session evidence (not included in the repository): `%TEMP%/qptp-skeleton-vrchat-lockfix.csv`,
 `qptp-skeleton-left-disconnected.csv`, `qptp-skeleton-left-reconnected.csv`,
 `qptp-skeleton-app-disconnected.csv`, `qptp-skeleton-app-reconnected.csv`, and `qptp-openxr-lockfix.txt`.
+
+## Virtual Desktop re-entry regression
+
+A late transport hook on the shared callback could be reached again by a saved _004 thunk that
+dynamically dispatched into the patched _005 table, causing a recursive mutex-lock failure.
+Validated forwarding wrappers now dispatch directly to the snapshotted inner method with the actual
+inner instance. The regression test installs a late inline scalar hook, forwards a nested update under
+a nonrecursive transport mutex, and verifies that the transport is not entered twice. A negative-control
+build without the forwarding bypass fails this test. The diagnostic log identifies the corrected path:
+`Native input forwarding bypass active (Virtual Desktop re-entry fix)`.

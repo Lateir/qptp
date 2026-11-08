@@ -4,6 +4,7 @@
 #include "skeletal_driver.hpp"
 #include "skeletal_mapping.hpp"
 #include "hand_simulation.h"
+#include <MinHook.h>
 #include <cassert>
 #include <windows.h>
 #include <algorithm>
@@ -47,6 +48,21 @@ __declspec(noinline) uint64_t native_skeleton(IVRDriverInput* api,uint64_t c){ui
 __declspec(noinline) uint64_t scalar(IVRDriverInput* api,uint64_t c,const char* path){uint64_t h;api->CreateScalarComponent(c,path,&h,VRScalarType_Absolute,VRScalarUnits_NormalizedOneSided);return h;}
 __declspec(noinline) void update(IVRDriverInput* api,uint64_t h,float v){api->UpdateScalarComponent(h,v,0);}
 bool equal(const Pose& a,const Pose& b){return std::memcmp(a.data(),b.data(),sizeof(Pose))==0;}
+using ScalarUpdate=EVRInputError(*)(IVRDriverInput*,VRInputComponentHandle_t,float,double);
+ScalarUpdate late_scalar_original=nullptr;
+IVRDriverInput* late_wrapper=nullptr;
+std::mutex late_transport_mutex;
+bool late_nested=false;
+EVRInputError late_scalar_hook(IVRDriverInput* self,VRInputComponentHandle_t h,float v,double t){
+    auto result=late_scalar_original(self,h,v,t);
+    if(result!=VRInputError_None)return result;
+    // Virtual Desktop forwards to its saved original, locks its own state, then sends
+    // another scalar via the cached _004 original. Re-entering its hook here is fatal.
+    if(!late_transport_mutex.try_lock())throw std::runtime_error("transport mutex re-entry");
+    std::lock_guard<std::mutex> lock(late_transport_mutex,std::adopt_lock);
+    if(!late_nested){late_nested=true;late_scalar_original(late_wrapper,h,v,t);late_nested=false;}
+    return result;
+}
 struct V {float x,y,z;};
 V operator+(V a,V b){return {a.x+b.x,a.y+b.y,a.z+b.z};}
 V operator-(V a,V b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
@@ -179,6 +195,15 @@ int main(){
     auto* wrapper_api=reinterpret_cast<IVRDriverInput*>(&wrapper);
     Mock queried_latest;
     assert(Start(wrapper_api,nullptr,nullptr,&queried_latest)); // Same ABI/table, separate factory instance.
+    auto scalar_handle=scalar(wrapper_api,900,"/input/trigger/value");
+    assert(scalar_handle==2000 && latest.next==2001 && queried_latest.next==1);
+    void* scalar_target=(*reinterpret_cast<void***>(wrapper_api))[3];
+    assert(MH_CreateHook(scalar_target,reinterpret_cast<void*>(&late_scalar_hook),reinterpret_cast<void**>(&late_scalar_original))==MH_OK);
+    assert(MH_EnableHook(scalar_target)==MH_OK);late_wrapper=wrapper_api;
+    bool transport_failed=false;try{update(wrapper_api,scalar_handle,.4f);}catch(const std::exception&){transport_failed=true;}
+    assert(MH_DisableHook(scalar_target)==MH_OK);assert(MH_RemoveHook(scalar_target)==MH_OK);
+    late_scalar_original=nullptr;late_wrapper=nullptr;late_nested=false;
+    assert(!transport_failed);
     auto latest_handle=native_skeleton(&latest,900);
     native_pose(&latest,latest_handle,base);native_pose(&latest,latest_handle,base,1);
     Adopt(900,0);s.skeleton_enabled=true;s.left.finger.valid=true;Frame(s);

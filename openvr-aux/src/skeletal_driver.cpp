@@ -30,10 +30,19 @@ bool g_mh_owned=false;
 thread_local unsigned g_passthrough=0;
 struct Direct {Direct(){++g_passthrough;}~Direct(){--g_passthrough;}};
 std::map<void**,std::array<void*,7>> g_originals;
+std::map<void**,void**> g_forward_tables;
 std::mutex g_original_mutex;
-template<class T>T original(IVRDriverInput* self,int slot){
+template<class T>T original(IVRDriverInput*& self,int slot){
     std::lock_guard<std::mutex> lock(g_original_mutex);
     auto** table=*reinterpret_cast<void***>(self);
+    auto forward=g_forward_tables.find(table);
+    if(forward!=g_forward_tables.end()){
+        // A saved _004 thunk dynamically dispatches through the _005 vtable. A later
+        // transport hook on our shared callback would then run twice (including while
+        // its own mutex is held). Call the validated, snapshotted inner method directly.
+        self=*reinterpret_cast<IVRDriverInput**>(reinterpret_cast<unsigned char*>(self)+8);
+        table=forward->second;
+    }
     auto found=g_originals.find(table);
     if(found!=g_originals.end())return reinterpret_cast<T>(found->second[slot]);
     // Other drivers may clone a dispatch table. Slot 4 is never patched here;
@@ -179,7 +188,12 @@ bool Start(IVRDriverInput* input, void (*log)(const char*), IVRDriverInput* lega
     if(legacy){auto table=*reinterpret_cast<void***>(legacy);if(table!=g_table)tables.push_back(table);}
     if(latest){auto table=*reinterpret_cast<void***>(latest);if(std::find(tables.begin(),tables.end(),table)==tables.end())tables.push_back(table);}
     // v003 and v004 share the first seven methods (verified against the v2.5.1 SDK).
-    for(auto table:tables){std::array<void*,7> saved{};std::copy_n(table,7,saved.begin());std::lock_guard<std::mutex> lock(g_original_mutex);g_originals[table]=saved;}
+    for(auto table:tables){std::array<void*,7> saved{};std::copy_n(table,7,saved.begin());std::lock_guard<std::mutex> lock(g_original_mutex);g_originals[table]=saved;g_forward_tables.erase(table);}
+    if(latest){
+        std::lock_guard<std::mutex> lock(g_original_mutex);
+        g_forward_tables[g_table]=*reinterpret_cast<void***>(latest);
+        if(legacy && compatible_latest(legacy,latest))g_forward_tables[*reinterpret_cast<void***>(legacy)]=*reinterpret_cast<void***>(latest);
+    }
     const auto init=MH_Initialize();
     if(init!=MH_OK && init!=MH_ERROR_ALREADY_INITIALIZED){Stop();return false;}
     g_mh_owned=init==MH_OK;
@@ -200,7 +214,7 @@ bool Start(IVRDriverInput* input, void (*log)(const char*), IVRDriverInput* lega
         g_hooks.push_back({table,t.first,saved,t.second});
     }
     for(auto target:g_detours)if(MH_EnableHook(target)!=MH_OK){Stop();return false;}
-    g_input=input;if(g_log){g_log("[qptp] Skeleton hooks installed for IVRDriverInput_003/_004 and validated _005, including cached update pointers");g_log(MappingRevision);}return true;
+    g_input=input;if(g_log){g_log("[qptp] Skeleton hooks installed for IVRDriverInput_003/_004 and validated _005, including cached update pointers");g_log(MappingRevision);if(latest)g_log("[qptp] Native input forwarding bypass active (Virtual Desktop re-entry fix)");}return true;
 }
 void Stop() {
     for(auto target:g_detours)MH_DisableHook(target);
